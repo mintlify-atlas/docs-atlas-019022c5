@@ -1,0 +1,247 @@
+---
+title: Settings Management
+description: Manage sensor parameters and actuator configurations for sectors
+---
+
+Settings define threshold values, control parameters, and actuator behaviors for each sector.
+
+## List All Settings
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Unique setting identifier
+</ResponseField>
+
+<ResponseField name="sectorId" type="integer">
+  Associated sector ID
+</ResponseField>
+
+<ResponseField name="parameterId" type="integer">
+  Data type parameter ID (temperature, humidity, etc.)
+</ResponseField>
+
+<ResponseField name="actuatorStateId" type="integer">
+  Target actuator state (ON, OFF, AUTO, etc.)
+</ResponseField>
+
+<ResponseField name="minValue" type="number">
+  Minimum threshold value
+</ResponseField>
+
+<ResponseField name="maxValue" type="number">
+  Maximum threshold value
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether this setting is currently active
+</ResponseField>
+
+## List Sector Settings
+
+Get all settings for a specific sector.
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/sector/{sectorId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="sectorId" type="integer" required>
+  Sector ID
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/tenants/1/settings/sector/5" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Get Active Settings
+
+Get only active settings for a sector.
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/sector/{sectorId}/active
+```
+
+<Info>
+  This endpoint filters settings where `isActive = true`, useful for runtime automation logic.
+</Info>
+
+## Get Setting by ID
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/{settingId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="settingId" type="integer" required>
+  Setting ID
+</ParamField>
+
+## Create Setting
+
+```bash
+POST /api/v1/tenants/{tenantId}/settings
+```
+
+### Request Body
+
+<ParamField body="sectorId" type="integer" required>
+  Sector ID where this setting applies
+</ParamField>
+
+<ParamField body="parameterId" type="integer" required>
+  Data type ID (1=INTEGER, 2=BOOLEAN, 3=STRING, 4=DOUBLE, etc.)
+</ParamField>
+
+<ParamField body="actuatorStateId" type="integer" required>
+  Actuator state ID (1=ON, 2=OFF, 3=AUTO, etc.)
+</ParamField>
+
+<ParamField body="minValue" type="number">
+  Minimum threshold (e.g., 18.0°C)
+</ParamField>
+
+<ParamField body="maxValue" type="number">
+  Maximum threshold (e.g., 28.0°C)
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Whether to activate this setting immediately (default: true)
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/tenants/1/settings" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sectorId": 5,
+    "parameterId": 4,
+    "actuatorStateId": 1,
+    "minValue": 18.0,
+    "maxValue": 28.0,
+    "isActive": true
+  }'
+```
+
+## Update Setting
+
+```bash
+PUT /api/v1/tenants/{tenantId}/settings/{settingId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="settingId" type="integer" required>
+  Setting ID
+</ParamField>
+
+### Request Body
+
+All fields are optional for updates.
+
+<ParamField body="minValue" type="number">
+  Updated minimum threshold
+</ParamField>
+
+<ParamField body="maxValue" type="number">
+  Updated maximum threshold
+</ParamField>
+
+<ParamField body="actuatorStateId" type="integer">
+  Updated actuator state
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Activate or deactivate the setting
+</ParamField>
+
+## Delete Setting
+
+```bash
+DELETE /api/v1/tenants/{tenantId}/settings/{settingId}
+```
+
+<Warning>
+  Deleting a setting removes the threshold configuration. Automation rules relying on this setting will no longer function.
+</Warning>
+
+## Query by Parameter
+
+Get settings for a specific parameter type across a sector.
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/sector/{sectorId}/parameter/{parameterId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="sectorId" type="integer" required>
+  Sector ID
+</ParamField>
+
+<ParamField path="parameterId" type="integer" required>
+  Parameter ID (data type)
+</ParamField>
+
+## Query by Actuator State
+
+Get settings configured for a specific actuator state.
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/sector/{sectorId}/actuator-state/{actuatorStateId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="sectorId" type="integer" required>
+  Sector ID
+</ParamField>
+
+<ParamField path="actuatorStateId" type="integer" required>
+  Actuator state ID
+</ParamField>
+
+## Query by Parameter and Actuator State
+
+Get settings matching both a parameter type and actuator state.
+
+```bash
+GET /api/v1/tenants/{tenantId}/settings/sector/{sectorId}/parameter/{parameterId}/actuator-state/{actuatorStateId}
+```
+
+<Info>
+  This endpoint is useful for finding the exact threshold that triggers a specific actuator action.
+</Info>
+
+### Example
+
+```bash cURL
+# Find temperature settings that turn irrigation ON
+curl -X GET "https://api.example.com/api/v1/tenants/1/settings/sector/5/parameter/4/actuator-state/1" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```

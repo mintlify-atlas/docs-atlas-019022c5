@@ -1,0 +1,161 @@
+---
+title: Sector Management
+description: Manage sectors within greenhouses for tenant organizations
+---
+
+Sectors represent subdivisions within a greenhouse, each with its own sensors, actuators, and environmental settings.
+
+## List Sectors
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+```bash
+GET /api/v1/tenants/{tenantId}/sectors
+```
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Unique sector identifier
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="integer">
+  Parent greenhouse ID
+</ResponseField>
+
+<ResponseField name="tenantId" type="integer">
+  Tenant ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Sector name (e.g., "Tomatoes Section A")
+</ResponseField>
+
+<ResponseField name="sectorNumber" type="integer">
+  Sector number within the greenhouse
+</ResponseField>
+
+<ResponseField name="area" type="number">
+  Sector area in square meters
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the sector is currently active
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/tenants/1/sectors" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Get Sector by ID
+
+```bash
+GET /api/v1/tenants/{tenantId}/sectors/{sectorId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="sectorId" type="integer" required>
+  Sector ID
+</ParamField>
+
+## Create Sector
+
+```bash
+POST /api/v1/tenants/{tenantId}/sectors
+```
+
+### Request Body
+
+<ParamField body="greenhouseId" type="integer" required>
+  Parent greenhouse ID
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Sector name
+</ParamField>
+
+<ParamField body="sectorNumber" type="integer" required>
+  Sector number (unique within greenhouse)
+</ParamField>
+
+<ParamField body="area" type="number">
+  Sector area in square meters
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/tenants/1/sectors" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "greenhouseId": 1,
+    "name": "Tomatoes Section A",
+    "sectorNumber": 1,
+    "area": 150.5
+  }'
+```
+
+## Update Sector
+
+```bash
+PUT /api/v1/tenants/{tenantId}/sectors/{sectorId}
+```
+
+<ParamField path="tenantId" type="integer" required>
+  Tenant ID
+</ParamField>
+
+<ParamField path="sectorId" type="integer" required>
+  Sector ID
+</ParamField>
+
+### Request Body
+
+All fields are optional for updates.
+
+<ParamField body="name" type="string">
+  Updated sector name
+</ParamField>
+
+<ParamField body="area" type="number">
+  Updated sector area
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Activate or deactivate the sector
+</ParamField>
+
+## Delete Sector
+
+```bash
+DELETE /api/v1/tenants/{tenantId}/sectors/{sectorId}
+```
+
+<Warning>
+  Deleting a sector will remove all associated settings and device configurations. This action cannot be undone.
+</Warning>
+
+## List Greenhouse Sectors
+
+Get all sectors for a specific greenhouse.
+
+```bash
+GET /api/v1/greenhouses/{greenhouseId}/sectors
+```
+
+<ParamField path="greenhouseId" type="integer" required>
+  Greenhouse ID
+</ParamField>
+
+<Note>
+  This endpoint provides the same sector data but organized by greenhouse rather than tenant.
+</Note>

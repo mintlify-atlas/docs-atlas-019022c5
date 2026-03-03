@@ -1,0 +1,285 @@
+---
+title: Greenhouse Legacy Endpoints
+description: Original greenhouse data endpoints (backwards compatibility)
+---
+
+These endpoints provide backwards compatibility with the original greenhouse monitoring implementation. For multi-tenant deployments, use the `/api/v1/tenants/{tenantId}/*` endpoints instead.
+
+<Note>
+  These legacy endpoints are maintained for compatibility but new integrations should use the tenant-scoped endpoints.
+</Note>
+
+## Get Recent Messages
+
+Retrieve the most recent sensor messages from Redis cache.
+
+```bash
+GET /api/v1/greenhouse/messages/recent
+```
+
+### Query Parameters
+
+<ParamField query="limit" type="integer" default="100">
+  Number of messages to retrieve (1-1000)
+</ParamField>
+
+### Response
+
+Returns an array of `RealDataDto` objects with 22 sensor fields.
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp
+</ResponseField>
+
+<ResponseField name="TEMPERATURA INVERNADERO 01" type="number">
+  Temperature reading for greenhouse 1
+</ResponseField>
+
+<ResponseField name="HUMEDAD INVERNADERO 01" type="number">
+  Humidity reading for greenhouse 1
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="string">
+  Greenhouse identifier
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/messages/recent?limit=50" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+[
+  {
+    "timestamp": "2025-03-03T22:00:00Z",
+    "TEMPERATURA INVERNADERO 01": 24.5,
+    "HUMEDAD INVERNADERO 01": 65.3,
+    "TEMPERATURA INVERNADERO 02": 23.8,
+    "HUMEDAD INVERNADERO 02": 68.1,
+    "TEMPERATURA INVERNADERO 03": 25.2,
+    "HUMEDAD INVERNADERO 03": 62.9,
+    "INVERNADERO_01_SECTOR_01": 1,
+    "INVERNADERO_01_SECTOR_02": 0,
+    "INVERNADERO_01_SECTOR_03": 1,
+    "INVERNADERO_01_SECTOR_04": 1,
+    "INVERNADERO_02_SECTOR_01": 0,
+    "INVERNADERO_02_SECTOR_02": 1,
+    "INVERNADERO_02_SECTOR_03": 0,
+    "INVERNADERO_02_SECTOR_04": 1,
+    "INVERNADERO_03_SECTOR_01": 1,
+    "INVERNADERO_03_SECTOR_02": 1,
+    "INVERNADERO_03_SECTOR_03": 0,
+    "INVERNADERO_03_SECTOR_04": 0,
+    "INVERNADERO_01_EXTRACTOR": 0,
+    "INVERNADERO_02_EXTRACTOR": 1,
+    "INVERNADERO_03_EXTRACTOR": 0,
+    "RESERVA": 0,
+    "greenhouseId": "001"
+  }
+]
+```
+
+## Get Messages by Time Range
+
+Query messages within a specific time period.
+
+```bash
+GET /api/v1/greenhouse/messages/range
+```
+
+### Query Parameters
+
+<ParamField query="from" type="string" required>
+  Start timestamp (ISO 8601 format)
+</ParamField>
+
+<ParamField query="to" type="string" required>
+  End timestamp (ISO 8601 format)
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/messages/range?from=2025-03-03T00:00:00Z&to=2025-03-03T23:59:59Z" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Get Sensor Statistics
+
+Calculate statistics for a specific sensor over a time period.
+
+```bash
+GET /api/v1/greenhouse/statistics/{sensorId}
+```
+
+<ParamField path="sensorId" type="string" required>
+  Sensor field name (e.g., "TEMPERATURA INVERNADERO 01")
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="period" type="string" default="24h">
+  Time period: `1h`, `24h`, `7d`, `30d`
+</ParamField>
+
+### Response
+
+<ResponseField name="sensorId" type="string">
+  Sensor field name
+</ResponseField>
+
+<ResponseField name="period" type="string">
+  Time period analyzed
+</ResponseField>
+
+<ResponseField name="minValue" type="number">
+  Minimum value in period
+</ResponseField>
+
+<ResponseField name="maxValue" type="number">
+  Maximum value in period
+</ResponseField>
+
+<ResponseField name="avgValue" type="number">
+  Average value in period
+</ResponseField>
+
+<ResponseField name="count" type="integer">
+  Number of readings
+</ResponseField>
+
+<ResponseField name="lastValue" type="number">
+  Most recent value
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/statistics/TEMPERATURA%20INVERNADERO%2001?period=24h" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+{
+  "sensorId": "TEMPERATURA INVERNADERO 01",
+  "period": "24h",
+  "minValue": 18.5,
+  "maxValue": 28.3,
+  "avgValue": 23.7,
+  "count": 1440,
+  "lastValue": 24.1
+}
+```
+
+## Get Summary Statistics
+
+Get aggregated statistics for all sensors.
+
+```bash
+GET /api/v1/greenhouse/statistics/summary
+```
+
+### Query Parameters
+
+<ParamField query="period" type="string" default="1h">
+  Time period: `1h`, `24h`, `7d`, `30d`
+</ParamField>
+
+Returns statistics for all 22 sensor fields.
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/statistics/summary?period=1h" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Get Cache Info
+
+Check Redis cache status and metadata.
+
+```bash
+GET /api/v1/greenhouse/cache/info
+```
+
+### Response
+
+<ResponseField name="totalMessages" type="integer">
+  Number of messages in cache (max 1000)
+</ResponseField>
+
+<ResponseField name="ttlSeconds" type="integer">
+  Time-to-live in seconds (86400 = 24 hours)
+</ResponseField>
+
+<ResponseField name="maxCapacity" type="integer">
+  Maximum cache capacity (1000)
+</ResponseField>
+
+<ResponseField name="utilizationPercentage" type="number">
+  Cache utilization (0-100%)
+</ResponseField>
+
+<ResponseField name="cacheType" type="string">
+  Data structure type ("Redis Sorted Set")
+</ResponseField>
+
+<ResponseField name="oldestMessageTimestamp" type="string">
+  Timestamp of oldest cached message
+</ResponseField>
+
+<ResponseField name="newestMessageTimestamp" type="string">
+  Timestamp of newest cached message
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/cache/info" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+{
+  "totalMessages": 1000,
+  "ttlSeconds": 86400,
+  "maxCapacity": 1000,
+  "utilizationPercentage": 100.0,
+  "cacheType": "Redis Sorted Set",
+  "oldestMessageTimestamp": "2025-03-02T22:15:30Z",
+  "newestMessageTimestamp": "2025-03-03T22:15:30Z"
+}
+```
+
+## Health Check
+
+Simple health check endpoint.
+
+```bash
+GET /api/v1/greenhouse/health
+```
+
+Returns HTTP 200 with `{"status": "UP"}` if the service is healthy.
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/greenhouse/health"
+```
+
+## Migration Guide
+
+For new implementations, use the tenant-scoped endpoints:
+
+| Legacy Endpoint | New Endpoint |
+|----------------|--------------|
+| `GET /api/v1/greenhouse/messages/recent` | `GET /api/v1/sensors/latest` |
+| `GET /api/v1/greenhouse/messages/range` | `GET /api/v1/sensors/by-greenhouse/{greenhouseId}` |
+| `GET /api/v1/greenhouse/statistics/{sensorId}` | `GET /api/v1/statistics/historical-data` |
+| `GET /api/v1/greenhouse/statistics/summary` | `GET /api/v1/statistics/summary` |
+
+<Info>
+  The new endpoints provide better multi-tenant isolation and support for filtering by tenant, greenhouse, and sensor.
+</Info>

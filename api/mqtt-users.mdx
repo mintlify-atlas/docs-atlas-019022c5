@@ -1,0 +1,276 @@
+---
+title: MQTT Users
+description: Manage MQTT client credentials and access control
+---
+
+MQTT users define authentication credentials and permissions for devices and services connecting to the MQTT broker.
+
+## List MQTT Users
+
+```bash
+GET /api/v1/mqtt-users
+```
+
+Retrieves all MQTT user accounts.
+
+### Response
+
+<ResponseField name="id" type="integer">
+  Unique MQTT user identifier
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  MQTT username for authentication
+</ResponseField>
+
+<ResponseField name="tenantId" type="integer">
+  Associated tenant ID
+</ResponseField>
+
+<ResponseField name="deviceType" type="string">
+  Device type: SENSOR, ACTUATOR, GATEWAY, API
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether this user can currently connect
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  Timestamp when user was created
+</ResponseField>
+
+<ResponseField name="lastConnectedAt" type="string">
+  Timestamp of last successful connection (null if never connected)
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/mqtt-users" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+[
+  {
+    "id": 1,
+    "username": "sensor_gh001",
+    "tenantId": 1,
+    "deviceType": "SENSOR",
+    "isActive": true,
+    "createdAt": "2025-01-15T10:30:00Z",
+    "lastConnectedAt": "2025-03-03T22:15:30Z"
+  },
+  {
+    "id": 2,
+    "username": "actuator_pump01",
+    "tenantId": 1,
+    "deviceType": "ACTUATOR",
+    "isActive": true,
+    "createdAt": "2025-01-15T10:35:00Z",
+    "lastConnectedAt": "2025-03-03T22:10:15Z"
+  }
+]
+```
+
+## Get MQTT User by ID
+
+```bash
+GET /api/v1/mqtt-users/{id}
+```
+
+<ParamField path="id" type="integer" required>
+  MQTT user ID
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/mqtt-users/1" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Create MQTT User
+
+```bash
+POST /api/v1/mqtt-users
+```
+
+Creates a new MQTT user with authentication credentials.
+
+### Request Body
+
+<ParamField body="username" type="string" required>
+  Unique MQTT username (3-50 characters)
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  MQTT password (minimum 8 characters, hashed with bcrypt)
+</ParamField>
+
+<ParamField body="tenantId" type="integer" required>
+  Tenant ID this user belongs to
+</ParamField>
+
+<ParamField body="deviceType" type="string" required>
+  Device type: `SENSOR`, `ACTUATOR`, `GATEWAY`, `API`
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/mqtt-users" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "sensor_gh002",
+    "password": "SecureP@ssw0rd!",
+    "tenantId": 1,
+    "deviceType": "SENSOR"
+  }'
+```
+
+<Warning>
+  Store passwords securely! The API hashes passwords with bcrypt before storing. The plain-text password cannot be retrieved later.
+</Warning>
+
+## Update MQTT User
+
+```bash
+PUT /api/v1/mqtt-users/{id}
+```
+
+<ParamField path="id" type="integer" required>
+  MQTT user ID
+</ParamField>
+
+### Request Body
+
+All fields are optional for updates.
+
+<ParamField body="password" type="string">
+  New password (will be hashed with bcrypt)
+</ParamField>
+
+<ParamField body="deviceType" type="string">
+  Updated device type
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Activate or deactivate the user
+</ParamField>
+
+### Example
+
+```bash cURL
+curl -X PUT "https://api.example.com/api/v1/mqtt-users/1" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "isActive": false
+  }'
+```
+
+## Delete MQTT User
+
+```bash
+DELETE /api/v1/mqtt-users/{id}
+```
+
+<ParamField path="id" type="integer" required>
+  MQTT user ID
+</ParamField>
+
+<Warning>
+  Deleting an MQTT user immediately revokes their access. Connected devices will be disconnected on their next message.
+</Warning>
+
+### Example
+
+```bash cURL
+curl -X DELETE "https://api.example.com/api/v1/mqtt-users/1" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Device Types
+
+MQTT users are categorized by device type for access control:
+
+### SENSOR
+- **Purpose**: Greenhouse sensor devices
+- **Permissions**: Publish sensor data to `GREENHOUSE/{tenantId}`
+- **Example**: Temperature sensors, humidity sensors, soil moisture
+
+### ACTUATOR
+- **Purpose**: Control devices (pumps, valves, windows)
+- **Permissions**: 
+  - Subscribe to command topics
+  - Publish status updates
+- **Example**: Irrigation pumps, ventilation systems, shade controllers
+
+### GATEWAY
+- **Purpose**: Edge gateways that aggregate multiple sensors
+- **Permissions**: 
+  - Publish data for multiple devices
+  - Subscribe to configuration updates
+- **Example**: Raspberry Pi gateway, industrial IoT gateway
+
+### API
+- **Purpose**: Backend services and integrations
+- **Permissions**: Full access (publish and subscribe to all topics)
+- **Example**: Analytics services, monitoring dashboards, third-party integrations
+
+## Access Control Lists (ACLs)
+
+ACL rules are automatically created based on device type:
+
+| Device Type | Publish Topics | Subscribe Topics |
+|-------------|----------------|------------------|
+| SENSOR | `GREENHOUSE/{tenantId}` | `GREENHOUSE/{tenantId}/commands/#` |
+| ACTUATOR | `GREENHOUSE/{tenantId}/status/#` | `GREENHOUSE/{tenantId}/actuators/#` |
+| GATEWAY | `GREENHOUSE/{tenantId}/#` | `GREENHOUSE/{tenantId}/#` |
+| API | `#` (all topics) | `#` (all topics) |
+
+<Info>
+  ACL permissions are enforced at the MQTT broker level using the EMQX authentication plugin.
+</Info>
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Strong Passwords" icon="lock">
+    Use minimum 12 characters with uppercase, lowercase, numbers, and symbols
+  </Card>
+  
+  <Card title="Unique Credentials" icon="key">
+    Each device should have its own unique MQTT username and password
+  </Card>
+  
+  <Card title="Regular Rotation" icon="rotate">
+    Rotate MQTT passwords every 90 days for production environments
+  </Card>
+  
+  <Card title="Monitor Access" icon="eye">
+    Track `lastConnectedAt` to detect unused or compromised accounts
+  </Card>
+</CardGroup>
+
+## Testing MQTT Authentication
+
+Test MQTT credentials using mosquitto_pub:
+
+```bash
+mosquitto_pub \
+  -h mqtt.example.com \
+  -p 1883 \
+  -u "sensor_gh001" \
+  -P "your_password" \
+  -t "GREENHOUSE/1" \
+  -m '{"TEMPERATURA INVERNADERO 01": 25.5}'
+```
+
+If authentication succeeds, the message will be published. If it fails, you'll receive an authentication error.
+
+<Note>
+  For production, use TLS/SSL (port 8883) instead of plain MQTT (port 1883).
+</Note>

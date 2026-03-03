@@ -1131,3 +1131,164 @@ if (!stateManager.isOperational(actuator.currentStateId)) {
     - **Use activeOnly=true** in queries to filter out deprecated types
   </Accordion>
 </AccordionGroup>
+---
+
+## Units Catalog
+
+Units define measurement units for sensors (°C, %, lux, ppm, etc.).
+
+### Get All Units
+
+```bash
+GET /api/v1/catalog/units
+```
+
+Retrieves all available measurement units.
+
+#### Response
+
+<ResponseField name="id" type="integer">
+  Unique unit identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Unit name (e.g., "Celsius", "Percent", "Lux")
+</ResponseField>
+
+<ResponseField name="symbol" type="string">
+  Unit symbol (e.g., "°C", "%", "lux")
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the unit is currently active
+</ResponseField>
+
+#### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/catalog/units" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Get Unit by ID
+
+```bash
+GET /api/v1/catalog/units/{id}
+```
+
+<ParamField path="id" type="integer" required>
+  Unit ID
+</ParamField>
+
+### Create Unit
+
+```bash
+POST /api/v1/catalog/units
+```
+
+<ParamField body="name" type="string" required>
+  Unit name
+</ParamField>
+
+<ParamField body="symbol" type="string" required>
+  Unit symbol
+</ParamField>
+
+### Update Unit
+
+```bash
+PUT /api/v1/catalog/units/{id}
+```
+
+### Activate Unit
+
+```bash
+PUT /api/v1/catalog/units/{id}/activate
+```
+
+Activates a previously deactivated unit.
+
+### Deactivate Unit
+
+```bash
+PUT /api/v1/catalog/units/{id}/deactivate
+```
+
+<Note>
+  Deactivated units cannot be deleted if they are referenced by devices or settings.
+</Note>
+
+---
+
+## Periods Catalog
+
+Periods define time intervals for alerts and automation rules.
+
+### Get All Periods
+
+```bash
+GET /api/v1/catalog/periods
+```
+
+Retrieves all available time periods.
+
+#### Response
+
+<ResponseField name="id" type="integer">
+  Unique period identifier
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Period name (e.g., "Morning", "Afternoon", "Night")
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Period description
+</ResponseField>
+
+#### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/catalog/periods" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### Get Period by ID
+
+```bash
+GET /api/v1/catalog/periods/{id}
+```
+
+<ParamField path="id" type="integer" required>
+  Period ID
+</ParamField>
+
+### Create Period
+
+```bash
+POST /api/v1/catalog/periods
+```
+
+<ParamField body="name" type="string" required>
+  Period name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Period description
+</ParamField>
+
+### Update Period
+
+```bash
+PUT /api/v1/catalog/periods/{id}
+```
+
+### Delete Period
+
+```bash
+DELETE /api/v1/catalog/periods/{id}
+```
+
+<Warning>
+  Cannot delete periods that are referenced by active automation rules or alerts.
+</Warning>

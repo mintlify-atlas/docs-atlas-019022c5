@@ -1,0 +1,196 @@
+---
+title: Simulation Mode
+description: Control simulation mode for testing without physical sensors
+---
+
+Simulation mode generates realistic greenhouse sensor data for development and testing purposes.
+
+<Warning>
+  Simulation mode should NEVER be enabled in production environments. It generates fake data instead of reading from actual sensors.
+</Warning>
+
+## Get Simulation Status
+
+```bash
+GET /api/v1/simulation/status
+```
+
+Returns the current simulation configuration and status.
+
+### Response
+
+<ResponseField name="enabled" type="boolean">
+  Whether simulation mode is currently enabled
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="string">
+  Greenhouse ID being simulated (default: "001")
+</ResponseField>
+
+<ResponseField name="interval" type="integer">
+  Interval in milliseconds between simulated readings (default: 5000)
+</ResponseField>
+
+<ResponseField name="running" type="boolean">
+  Whether the simulation scheduler is actively running
+</ResponseField>
+
+### Example
+
+```bash cURL
+curl -X GET "https://api.example.com/api/v1/simulation/status" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+{
+  "enabled": true,
+  "greenhouseId": "001",
+  "interval": 5000,
+  "running": true
+}
+```
+
+## Start Simulation
+
+Start the simulation scheduler.
+
+```bash
+POST /api/v1/simulation/start
+```
+
+<Note>
+  Simulation must be enabled in configuration (`greenhouse.simulation.enabled: true` in `application.yaml`) before it can be started.
+</Note>
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/simulation/start" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Stop Simulation
+
+Stop the simulation scheduler.
+
+```bash
+POST /api/v1/simulation/stop
+```
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/simulation/stop" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## Generate Single Reading
+
+Generate a single simulated sensor reading without starting the scheduler.
+
+```bash
+POST /api/v1/simulation/generate
+```
+
+This endpoint is useful for testing data processing without continuous simulation.
+
+### Response
+
+Returns a `RealDataDto` object with 22 simulated sensor fields:
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp of the simulated reading
+</ResponseField>
+
+<ResponseField name="TEMPERATURA INVERNADERO 01" type="number">
+  Simulated temperature for greenhouse 1 (15-30°C)
+</ResponseField>
+
+<ResponseField name="HUMEDAD INVERNADERO 01" type="number">
+  Simulated humidity for greenhouse 1 (40-80%)
+</ResponseField>
+
+<ResponseField name="INVERNADERO_01_SECTOR_01" type="number">
+  Simulated sector 1 status (0 or 1)
+</ResponseField>
+
+<Expandable title="All 22 Simulated Fields">
+  - Temperature fields (6): TEMPERATURA INVERNADERO 01-03
+  - Humidity fields (6): HUMEDAD INVERNADERO 01-03
+  - Sector fields (12): INVERNADERO_01_SECTOR_01 through INVERNADERO_03_SECTOR_04
+  - Extractor fields (3): INVERNADERO_01_EXTRACTOR through INVERNADERO_03_EXTRACTOR
+  - Metadata: timestamp, greenhouseId
+</Expandable>
+
+### Example
+
+```bash cURL
+curl -X POST "https://api.example.com/api/v1/simulation/generate" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+```json Response
+{
+  "timestamp": "2025-03-03T22:15:30Z",
+  "TEMPERATURA INVERNADERO 01": 23.5,
+  "HUMEDAD INVERNADERO 01": 65.2,
+  "TEMPERATURA INVERNADERO 02": 24.1,
+  "HUMEDAD INVERNADERO 02": 62.8,
+  "TEMPERATURA INVERNADERO 03": 22.9,
+  "HUMEDAD INVERNADERO 03": 68.5,
+  "INVERNADERO_01_SECTOR_01": 1,
+  "INVERNADERO_01_SECTOR_02": 0,
+  "INVERNADERO_01_SECTOR_03": 1,
+  "INVERNADERO_01_SECTOR_04": 1,
+  "INVERNADERO_02_SECTOR_01": 0,
+  "INVERNADERO_02_SECTOR_02": 1,
+  "INVERNADERO_02_SECTOR_03": 0,
+  "INVERNADERO_02_SECTOR_04": 1,
+  "INVERNADERO_03_SECTOR_01": 1,
+  "INVERNADERO_03_SECTOR_02": 1,
+  "INVERNADERO_03_SECTOR_03": 0,
+  "INVERNADERO_03_SECTOR_04": 0,
+  "INVERNADERO_01_EXTRACTOR": 0,
+  "INVERNADERO_02_EXTRACTOR": 1,
+  "INVERNADERO_03_EXTRACTOR": 0,
+  "RESERVA": 0,
+  "greenhouseId": "001"
+}
+```
+
+## Configuration
+
+Simulation is configured in `application.yaml`:
+
+```yaml
+greenhouse:
+  simulation:
+    enabled: true          # Enable/disable simulation
+    greenhouse-id: "001"   # Default greenhouse ID
+    interval: 5000         # Milliseconds between readings
+```
+
+<Warning>
+  Set `greenhouse.simulation.enabled: false` in production to ensure real sensor data is used.
+</Warning>
+
+## Simulated Data Characteristics
+
+The simulation generates realistic data:
+
+- **Temperature**: Gradual changes (±0.5°C per cycle) within 15-30°C range
+- **Humidity**: Gradual changes (±1% per cycle) within 40-80% range
+- **Sectors**: Random binary states (0=OFF, 1=ON) 
+- **Extractors**: Random binary states with lower ON probability
+
+<Info>
+  Simulated values use smooth transitions rather than random jumps to mimic real sensor behavior.
+</Info>
+
+## Use Cases
+
+- **Development**: Test without physical greenhouse hardware
+- **Integration Testing**: Verify MQTT → Redis → TimescaleDB → WebSocket pipeline
+- **Load Testing**: Generate predictable data patterns for performance testing
+- **Demonstrations**: Show the system working without sensor dependencies

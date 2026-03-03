@@ -74,6 +74,8 @@
             "pages": [
               "api/tenants/overview",
               "api/tenants/greenhouses",
+              "api/tenants/sectors",
+              "api/tenants/settings",
               "api/tenants/users",
               "api/tenants/alerts"
             ]
@@ -91,7 +93,8 @@
             "pages": [
               "api/mqtt/publishing",
               "api/mqtt/topics",
-              "api/mqtt/rate-limiting"
+              "api/mqtt/rate-limiting",
+              "api/mqtt-users"
             ]
           },
           {
@@ -100,6 +103,13 @@
               "api/catalogs/data-types",
               "api/catalogs/devices",
               "api/catalogs/alerts"
+            ]
+          },
+          {
+            "group": "Additional Endpoints",
+            "pages": [
+              "api/simulation",
+              "api/greenhouse-legacy"
             ]
           }
         ]
