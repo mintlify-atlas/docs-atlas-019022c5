@@ -1,0 +1,1133 @@
+---
+title: "Device Catalog"
+description: "Manage device categories, types, and actuator states"
+---
+
+## Overview
+
+The Device Catalog provides centralized management for:
+
+- **Device Categories**: SENSOR or ACTUATOR classifications
+- **Device Types**: Specific sensor/actuator types (temperature, humidity, pumps, valves, etc.)
+- **Actuator States**: Operational states for actuators (ON, OFF, AUTO, MANUAL, ERROR)
+
+This catalog enables dynamic device configuration and type-safe device management across greenhouses.
+
+---
+
+## Device Categories
+
+### Get All Device Categories
+
+<CodeGroup>
+```bash GET /api/v1/catalog/device-categories
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/device-categories" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves available device categories (SENSOR and ACTUATOR).
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 1,
+    "name": "SENSOR"
+  },
+  {
+    "id": 2,
+    "name": "ACTUATOR"
+  }
+]
+```
+</ResponseExample>
+
+<Note>
+  **System Constants**
+  
+  Device categories are system-defined:
+  - **ID 1** = SENSOR (devices that measure values)
+  - **ID 2** = ACTUATOR (devices that perform actions)
+</Note>
+
+---
+
+## Device Types
+
+### Get All Device Types
+
+<CodeGroup>
+```bash GET /api/v1/catalog/device-types
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/device-types?categoryId=1&activeOnly=true" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves device types with optional filtering.
+
+### Query Parameters
+
+<ParamField query="categoryId" type="short">
+  Filter by category: `1` = SENSOR, `2` = ACTUATOR
+</ParamField>
+
+<ParamField query="activeOnly" type="boolean" default="true">
+  Return only active device types
+</ParamField>
+
+### Response
+
+<ResponseField name="data" type="array">
+  Array of device type objects
+  
+  <Expandable title="DeviceTypeResponse">
+    <ResponseField name="id" type="short" required>
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Device type name (e.g., "TEMPERATURE", "HUMIDITY", "PUMP")
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the device type
+    </ResponseField>
+    
+    <ResponseField name="categoryId" type="short" required>
+      Category ID (1=SENSOR, 2=ACTUATOR)
+    </ResponseField>
+    
+    <ResponseField name="categoryName" type="string">
+      Category name ("SENSOR" or "ACTUATOR")
+    </ResponseField>
+    
+    <ResponseField name="defaultUnitId" type="short">
+      Default measurement unit ID
+    </ResponseField>
+    
+    <ResponseField name="defaultUnitSymbol" type="string">
+      Default unit symbol (e.g., "°C", "%", "hPa")
+    </ResponseField>
+    
+    <ResponseField name="dataType" type="string">
+      Data type: DECIMAL, INTEGER, BOOLEAN, TEXT, JSON
+    </ResponseField>
+    
+    <ResponseField name="minExpectedValue" type="number">
+      Minimum expected physical value
+    </ResponseField>
+    
+    <ResponseField name="maxExpectedValue" type="number">
+      Maximum expected physical value
+    </ResponseField>
+    
+    <ResponseField name="controlType" type="string">
+      For actuators: BINARY (on/off), CONTINUOUS (0-100%), MULTI_STATE (predefined states)
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean" required>
+      Whether the device type is active
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200 OK - Sensor Types
+[
+  {
+    "id": 1,
+    "name": "TEMPERATURE",
+    "description": "Temperature sensor",
+    "categoryId": 1,
+    "categoryName": "SENSOR",
+    "defaultUnitId": 1,
+    "defaultUnitSymbol": "°C",
+    "dataType": "DECIMAL",
+    "minExpectedValue": -50.0,
+    "maxExpectedValue": 100.0,
+    "controlType": null,
+    "isActive": true
+  },
+  {
+    "id": 2,
+    "name": "HUMIDITY",
+    "description": "Relative humidity sensor",
+    "categoryId": 1,
+    "categoryName": "SENSOR",
+    "defaultUnitId": 2,
+    "defaultUnitSymbol": "%",
+    "dataType": "DECIMAL",
+    "minExpectedValue": 0.0,
+    "maxExpectedValue": 100.0,
+    "controlType": null,
+    "isActive": true
+  }
+]
+```
+
+```json 200 OK - Actuator Types
+[
+  {
+    "id": 10,
+    "name": "IRRIGATION_PUMP",
+    "description": "Water pump for irrigation",
+    "categoryId": 2,
+    "categoryName": "ACTUATOR",
+    "defaultUnitId": null,
+    "defaultUnitSymbol": null,
+    "dataType": "BOOLEAN",
+    "minExpectedValue": null,
+    "maxExpectedValue": null,
+    "controlType": "BINARY",
+    "isActive": true
+  },
+  {
+    "id": 11,
+    "name": "VENT_WINDOW",
+    "description": "Automated vent window",
+    "categoryId": 2,
+    "categoryName": "ACTUATOR",
+    "defaultUnitId": 2,
+    "defaultUnitSymbol": "%",
+    "dataType": "INTEGER",
+    "minExpectedValue": 0.0,
+    "maxExpectedValue": 100.0,
+    "controlType": "CONTINUOUS",
+    "isActive": true
+  }
+]
+```
+</ResponseExample>
+
+---
+
+### Get Sensor Types (Shortcut)
+
+<CodeGroup>
+```bash GET /api/v1/catalog/device-types/sensors
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/device-types/sensors" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Shortcut endpoint to retrieve only sensor types (equivalent to `?categoryId=1`).
+
+---
+
+### Get Actuator Types (Shortcut)
+
+<CodeGroup>
+```bash GET /api/v1/catalog/device-types/actuators
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/device-types/actuators" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Shortcut endpoint to retrieve only actuator types (equivalent to `?categoryId=2`).
+
+---
+
+### Get Device Type by ID
+
+<CodeGroup>
+```bash GET /api/v1/catalog/device-types/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/device-types/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Device type ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 1,
+  "name": "TEMPERATURE",
+  "description": "Temperature sensor",
+  "categoryId": 1,
+  "categoryName": "SENSOR",
+  "defaultUnitId": 1,
+  "defaultUnitSymbol": "°C",
+  "dataType": "DECIMAL",
+  "minExpectedValue": -50.0,
+  "maxExpectedValue": 100.0,
+  "controlType": null,
+  "isActive": true
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Device type not found"
+}
+```
+</ResponseExample>
+
+---
+
+### Create Device Type
+
+<CodeGroup>
+```bash POST /api/v1/catalog/device-types
+curl -X POST "https://api.invernaderos.com/api/v1/catalog/device-types" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "SOIL_MOISTURE",
+    "description": "Soil moisture sensor",
+    "categoryId": 1,
+    "defaultUnitId": 2,
+    "dataType": "DECIMAL",
+    "minExpectedValue": 0.0,
+    "maxExpectedValue": 100.0,
+    "isActive": true
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Device type name (max 30 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the device type
+</ParamField>
+
+<ParamField body="categoryId" type="short" required>
+  Category ID: `1` = SENSOR, `2` = ACTUATOR
+</ParamField>
+
+<ParamField body="defaultUnitId" type="short">
+  Default measurement unit ID (from Units catalog)
+</ParamField>
+
+<ParamField body="dataType" type="string" default="DECIMAL">
+  Data type: `DECIMAL`, `INTEGER`, `BOOLEAN`, `TEXT`, `JSON`
+</ParamField>
+
+<ParamField body="minExpectedValue" type="number">
+  Minimum expected physical value (for validation)
+</ParamField>
+
+<ParamField body="maxExpectedValue" type="number">
+  Maximum expected physical value (for validation)
+</ParamField>
+
+<ParamField body="controlType" type="string">
+  For actuators: `BINARY` (on/off), `CONTINUOUS` (0-100%), `MULTI_STATE` (predefined states)
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the device type is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": 15,
+  "name": "SOIL_MOISTURE",
+  "description": "Soil moisture sensor",
+  "categoryId": 1,
+  "categoryName": "SENSOR",
+  "defaultUnitId": 2,
+  "defaultUnitSymbol": "%",
+  "dataType": "DECIMAL",
+  "minExpectedValue": 0.0,
+  "maxExpectedValue": 100.0,
+  "controlType": null,
+  "isActive": true
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Device type 'SOIL_MOISTURE' already exists"
+}
+```
+
+```json 400 Bad Request - Invalid Category
+{
+  "error": "Category ID 3 does not exist"
+}
+```
+</ResponseExample>
+
+---
+
+### Update Device Type
+
+<CodeGroup>
+```bash PUT /api/v1/catalog/device-types/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/catalog/device-types/15" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Soil moisture sensor with improved accuracy",
+    "maxExpectedValue": 90.0
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Device type ID to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New device type name (max 30 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+<ParamField body="categoryId" type="short">
+  New category ID
+</ParamField>
+
+<ParamField body="defaultUnitId" type="short">
+  New default unit ID
+</ParamField>
+
+<ParamField body="dataType" type="string">
+  New data type
+</ParamField>
+
+<ParamField body="minExpectedValue" type="number">
+  New minimum expected value
+</ParamField>
+
+<ParamField body="maxExpectedValue" type="number">
+  New maximum expected value
+</ParamField>
+
+<ParamField body="controlType" type="string">
+  New control type (for actuators)
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  New active status
+</ParamField>
+
+### Response
+
+Same structure as "Create Device Type" with updated values.
+
+---
+
+### Activate/Deactivate Device Type
+
+<CodeGroup>
+```bash Activate
+PATCH /api/v1/catalog/device-types/{id}/activate
+curl -X PATCH "https://api.invernaderos.com/api/v1/catalog/device-types/15/activate" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```bash Deactivate
+PATCH /api/v1/catalog/device-types/{id}/deactivate
+curl -X PATCH "https://api.invernaderos.com/api/v1/catalog/device-types/15/deactivate" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Soft delete/restore device types without removing from database.
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Device type ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 15,
+  "name": "SOIL_MOISTURE",
+  "description": "Soil moisture sensor",
+  "categoryId": 1,
+  "categoryName": "SENSOR",
+  "defaultUnitId": 2,
+  "defaultUnitSymbol": "%",
+  "dataType": "DECIMAL",
+  "minExpectedValue": 0.0,
+  "maxExpectedValue": 100.0,
+  "controlType": null,
+  "isActive": false  // Changed to false after deactivation
+}
+```
+</ResponseExample>
+
+---
+
+### Delete Device Type
+
+<CodeGroup>
+```bash DELETE /api/v1/catalog/device-types/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/catalog/device-types/15" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Device type ID to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 204 No Content
+Device type deleted successfully (no body)
+```
+
+```json 404 Not Found
+{
+  "error": "Device type not found"
+}
+```
+
+```json 409 Conflict - Associated Devices Exist
+{
+  "error": "Cannot delete device type 'TEMPERATURE' because 25 devices are using it"
+}
+```
+</ResponseExample>
+
+<Warning>
+  **Deletion Constraints**
+  
+  Cannot delete device types that have associated devices (sensors or actuators). You must:
+  
+  1. Remove or reassign all devices using this type, OR
+  2. Use deactivation (`PATCH /deactivate`) instead for soft delete
+</Warning>
+
+---
+
+## Actuator States Catalog
+
+### Get All Actuator States
+
+<CodeGroup>
+```bash GET /api/v1/catalog/actuator-states
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/actuator-states" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all possible actuator states (ON, OFF, AUTO, MANUAL, ERROR, etc.).
+
+### Response
+
+<ResponseField name="data" type="array">
+  Array of actuator state objects
+  
+  <Expandable title="ActuatorStateResponse">
+    <ResponseField name="id" type="short" required>
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      State name (e.g., "ON", "OFF", "AUTO", "MANUAL", "ERROR")
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the state
+    </ResponseField>
+    
+    <ResponseField name="isOperational" type="boolean" required>
+      Whether the actuator is functioning in this state
+    </ResponseField>
+    
+    <ResponseField name="displayOrder" type="short" required>
+      Sort order for UI display
+    </ResponseField>
+    
+    <ResponseField name="color" type="string">
+      Hex color code for UI visualization (e.g., "#00FF00")
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 1,
+    "name": "ON",
+    "description": "Actuator is running",
+    "isOperational": true,
+    "displayOrder": 1,
+    "color": "#00FF00"
+  },
+  {
+    "id": 2,
+    "name": "OFF",
+    "description": "Actuator is stopped",
+    "isOperational": false,
+    "displayOrder": 2,
+    "color": "#808080"
+  },
+  {
+    "id": 3,
+    "name": "AUTO",
+    "description": "Automatic mode based on sensors",
+    "isOperational": true,
+    "displayOrder": 3,
+    "color": "#0066FF"
+  },
+  {
+    "id": 4,
+    "name": "MANUAL",
+    "description": "Manual control mode",
+    "isOperational": true,
+    "displayOrder": 4,
+    "color": "#FFAA00"
+  },
+  {
+    "id": 5,
+    "name": "ERROR",
+    "description": "Actuator malfunction",
+    "isOperational": false,
+    "displayOrder": 10,
+    "color": "#FF0000"
+  }
+]
+```
+</ResponseExample>
+
+---
+
+### Get Operational States Only
+
+<CodeGroup>
+```bash GET /api/v1/catalog/actuator-states/operational
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/actuator-states/operational" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves only states where the actuator is functioning (`isOperational = true`).
+
+### Response
+
+Same structure as "Get All Actuator States", but filtered to operational states only (ON, AUTO, MANUAL, etc.).
+
+---
+
+### Get Actuator State by ID
+
+<CodeGroup>
+```bash GET /api/v1/catalog/actuator-states/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/actuator-states/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Actuator state ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 1,
+  "name": "ON",
+  "description": "Actuator is running",
+  "isOperational": true,
+  "displayOrder": 1,
+  "color": "#00FF00"
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Actuator state not found"
+}
+```
+</ResponseExample>
+
+---
+
+### Create Actuator State
+
+<CodeGroup>
+```bash POST /api/v1/catalog/actuator-states
+curl -X POST "https://api.invernaderos.com/api/v1/catalog/actuator-states" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "WARMING_UP",
+    "description": "Actuator is warming up before full operation",
+    "isOperational": true,
+    "displayOrder": 5,
+    "color": "#FFA500"
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  State name (max 20 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the state
+</ParamField>
+
+<ParamField body="isOperational" type="boolean" default="false">
+  Whether the actuator is functioning in this state
+</ParamField>
+
+<ParamField body="displayOrder" type="short" default="0">
+  Sort order for UI display (minimum 0)
+</ParamField>
+
+<ParamField body="color" type="string">
+  Hex color code (format: `#RRGGBB`, e.g., "#FFA500")
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": 6,
+  "name": "WARMING_UP",
+  "description": "Actuator is warming up before full operation",
+  "isOperational": true,
+  "displayOrder": 5,
+  "color": "#FFA500"
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Actuator state 'WARMING_UP' already exists"
+}
+```
+
+```json 400 Bad Request - Invalid Color
+{
+  "error": "Color must be valid hex code (e.g., #FF0000)"
+}
+```
+</ResponseExample>
+
+---
+
+### Update Actuator State
+
+<CodeGroup>
+```bash PUT /api/v1/catalog/actuator-states/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/catalog/actuator-states/6" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Actuator warming up - full operation in 30 seconds",
+    "displayOrder": 3
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Actuator state ID to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New state name (max 20 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+<ParamField body="isOperational" type="boolean">
+  New operational status
+</ParamField>
+
+<ParamField body="displayOrder" type="short">
+  New display order (minimum 0)
+</ParamField>
+
+<ParamField body="color" type="string">
+  New hex color code
+</ParamField>
+
+### Response
+
+Same structure as "Create Actuator State" with updated values.
+
+---
+
+### Delete Actuator State
+
+<CodeGroup>
+```bash DELETE /api/v1/catalog/actuator-states/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/catalog/actuator-states/6" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Actuator state ID to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 204 No Content
+Actuator state deleted successfully (no body)
+```
+
+```json 404 Not Found
+{
+  "error": "Actuator state not found"
+}
+```
+</ResponseExample>
+
+---
+
+## Control Types Explained
+
+<AccordionGroup>
+  <Accordion title="BINARY Control">
+    **Use Case**: Simple on/off actuators
+    
+    **Examples**:
+    - Irrigation pumps (ON/OFF)
+    - Grow lights (ON/OFF)
+    - Heaters (ON/OFF)
+    
+    **Data Type**: BOOLEAN
+    
+    **States**: ON, OFF
+    
+    **Implementation**:
+    ```json
+    {
+      "name": "IRRIGATION_PUMP",
+      "categoryId": 2,
+      "controlType": "BINARY",
+      "dataType": "BOOLEAN"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="CONTINUOUS Control">
+    **Use Case**: Variable speed/position actuators
+    
+    **Examples**:
+    - Vent windows (0-100% open)
+    - Variable speed fans (0-100% speed)
+    - Dimmers (0-100% brightness)
+    
+    **Data Type**: INTEGER or DECIMAL
+    
+    **Range**: 0-100 (percentage)
+    
+    **Implementation**:
+    ```json
+    {
+      "name": "VENT_WINDOW",
+      "categoryId": 2,
+      "controlType": "CONTINUOUS",
+      "dataType": "INTEGER",
+      "minExpectedValue": 0,
+      "maxExpectedValue": 100,
+      "defaultUnitId": 2  // % symbol
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="MULTI_STATE Control">
+    **Use Case**: Actuators with predefined states
+    
+    **Examples**:
+    - Irrigation valves (CLOSED, ZONE_1, ZONE_2, ZONE_3)
+    - Multi-speed fans (OFF, LOW, MEDIUM, HIGH)
+    - Heating systems (OFF, ECO, COMFORT, BOOST)
+    
+    **Data Type**: TEXT or INTEGER (state index)
+    
+    **States**: Defined in actuator_states catalog
+    
+    **Implementation**:
+    ```json
+    {
+      "name": "IRRIGATION_VALVE",
+      "categoryId": 2,
+      "controlType": "MULTI_STATE",
+      "dataType": "TEXT"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Integration Examples
+
+<CodeGroup>
+```javascript Dynamic Device Configuration UI
+// Generate device configuration form based on device type
+const loadDeviceTypeConfig = async (deviceTypeId) => {
+  const deviceType = await fetch(
+    `https://api.invernaderos.com/api/v1/catalog/device-types/${deviceTypeId}`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  ).then(res => res.json());
+  
+  // Generate UI based on control type
+  switch (deviceType.controlType) {
+    case 'BINARY':
+      return {
+        component: 'Toggle',
+        props: {
+          label: deviceType.name,
+          states: ['ON', 'OFF']
+        }
+      };
+    
+    case 'CONTINUOUS':
+      return {
+        component: 'Slider',
+        props: {
+          label: deviceType.name,
+          min: deviceType.minExpectedValue,
+          max: deviceType.maxExpectedValue,
+          unit: deviceType.defaultUnitSymbol,
+          step: 1
+        }
+      };
+    
+    case 'MULTI_STATE':
+      const states = await fetch(
+        'https://api.invernaderos.com/api/v1/catalog/actuator-states',
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      ).then(res => res.json());
+      
+      return {
+        component: 'Dropdown',
+        props: {
+          label: deviceType.name,
+          options: states.map(s => ({ value: s.id, label: s.name }))
+        }
+      };
+    
+    default:
+      return { component: 'Input', props: { label: deviceType.name } };
+  }
+};
+```
+
+```python Sensor Value Validation
+import requests
+
+def validate_sensor_reading(device_type_id, value):
+    """Validate sensor reading against device type constraints"""
+    
+    # Get device type configuration
+    response = requests.get(
+        f"https://api.invernaderos.com/api/v1/catalog/device-types/{device_type_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    device_type = response.json()
+    
+    # Check if value is within expected range
+    if device_type["minExpectedValue"] is not None:
+        if value < device_type["minExpectedValue"]:
+            return {
+                "valid": False,
+                "error": f"Value {value} below minimum {device_type['minExpectedValue']}"
+            }
+    
+    if device_type["maxExpectedValue"] is not None:
+        if value > device_type["maxExpectedValue"]:
+            return {
+                "valid": False,
+                "error": f"Value {value} exceeds maximum {device_type['maxExpectedValue']}"
+            }
+    
+    return {"valid": True}
+
+# Usage
+result = validate_sensor_reading(1, 25.5)  # Temperature: 25.5°C
+if not result["valid"]:
+    print(f"Invalid reading: {result['error']}")
+```
+
+```kotlin Actuator State Management (Android)
+class ActuatorStateManager(private val api: InvernaderosApi) {
+    
+    // Cache actuator states for offline use
+    private val stateCache = mutableMapOf<Short, ActuatorStateResponse>()
+    
+    suspend fun cacheActuatorStates() {
+        val states = api.getActuatorStates()
+        states.forEach { state ->
+            stateCache[state.id] = state
+        }
+    }
+    
+    // Get color for state visualization
+    fun getStateColor(stateId: Short): Int {
+        val state = stateCache[stateId] ?: return Color.GRAY
+        return try {
+            Color.parseColor(state.color)
+        } catch (e: Exception) {
+            Color.GRAY
+        }
+    }
+    
+    // Check if actuator is operational
+    fun isOperational(stateId: Short): Boolean {
+        return stateCache[stateId]?.isOperational ?: false
+    }
+    
+    // Get all operational states for UI dropdown
+    suspend fun getOperationalStates(): List<ActuatorStateResponse> {
+        return api.getOperationalActuatorStates()
+    }
+}
+
+// Usage in UI
+val stateManager = ActuatorStateManager(api)
+stateManager.cacheActuatorStates()
+
+// Display actuator status with color
+val stateColor = stateManager.getStateColor(actuator.currentStateId)
+actorStatusView.setBackgroundColor(stateColor)
+
+// Check if actuator needs attention
+if (!stateManager.isOperational(actuator.currentStateId)) {
+    showMaintenanceAlert(actuator)
+}
+```
+</CodeGroup>
+
+---
+
+## Error Codes
+
+| Status Code | Description | Resolution |
+|-------------|-------------|------------|
+| **200 OK** | Request successful | - |
+| **201 Created** | Resource created successfully | - |
+| **204 No Content** | Resource deleted successfully | - |
+| **400 Bad Request** | Invalid input (duplicate name, invalid category, invalid color format) | Check error message for details |
+| **404 Not Found** | Resource not found with specified ID | Verify the ID exists |
+| **409 Conflict** | Cannot delete resource due to dependencies (devices using type) | Remove dependencies or use deactivation |
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Sensor Types">
+    When creating sensor types:
+    
+    1. **Set realistic value ranges** (`minExpectedValue`, `maxExpectedValue`) for validation
+    2. **Choose appropriate units** from the Units catalog
+    3. **Use DECIMAL data type** for most measurements (temperature, humidity, pressure)
+    4. **Document physical constraints** in the description field
+    
+    Example:
+    ```json
+    {
+      "name": "SOIL_TEMPERATURE",
+      "description": "Soil temperature at 10cm depth",
+      "categoryId": 1,
+      "defaultUnitId": 1,  // °C
+      "dataType": "DECIMAL",
+      "minExpectedValue": -10.0,
+      "maxExpectedValue": 50.0
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Actuator Types">
+    When creating actuator types:
+    
+    1. **Choose correct control type** (BINARY, CONTINUOUS, MULTI_STATE)
+    2. **For CONTINUOUS**, always set min/max values (typically 0-100)
+    3. **For MULTI_STATE**, define states in actuator_states catalog first
+    4. **Document control behavior** in the description
+    
+    Example:
+    ```json
+    {
+      "name": "NUTRIENT_PUMP",
+      "description": "Variable speed nutrient injection pump (0-100% flow rate)",
+      "categoryId": 2,
+      "defaultUnitId": 2,  // %
+      "controlType": "CONTINUOUS",
+      "dataType": "INTEGER",
+      "minExpectedValue": 0,
+      "maxExpectedValue": 100
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Actuator States">
+    When defining actuator states:
+    
+    1. **Use consistent naming** (uppercase: ON, OFF, AUTO, MANUAL)
+    2. **Set isOperational correctly** (true = actuator functioning, false = error/stopped)
+    3. **Choose intuitive colors**: Green (operational), Red (error), Gray (off), Orange (transitional)
+    4. **Order by priority**: Critical states (ERROR) should have high displayOrder
+    
+    Example:
+    ```json
+    {
+      "name": "STARTING",
+      "description": "Actuator is starting up",
+      "isOperational": true,
+      "displayOrder": 4,
+      "color": "#FFA500"  // Orange for transitional state
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Soft Deletes">
+    - **Prefer deactivation** over deletion to preserve historical device configurations
+    - **Only delete** truly unused custom types with zero associated devices
+    - **Document deprecation** in description before deactivating
+    - **Use activeOnly=true** in queries to filter out deprecated types
+  </Accordion>
+</AccordionGroup>

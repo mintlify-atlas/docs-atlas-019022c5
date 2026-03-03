@@ -1,0 +1,1099 @@
+---
+title: "System Architecture"
+description: "Deep dive into the Invernaderos API architecture, data flow, and component interactions"
+---
+
+# System Architecture
+
+The Invernaderos API is built with a **modern, event-driven architecture** optimized for high-throughput IoT sensor data ingestion, storage, and real-time distribution.
+
+## High-Level Architecture
+
+```mermaid
+graph TB
+    subgraph "IoT Devices"
+        A[Greenhouse Sensors]
+    end
+    
+    subgraph "Message Broker"
+        B[EMQX MQTT Broker]
+    end
+    
+    subgraph "API Layer"
+        C[Spring Boot API]
+        C1[MQTT Listener]
+        C2[Message Processor]
+        C3[REST Controllers]
+        C4[WebSocket Handler]
+        
+        C --> C1
+        C --> C2
+        C --> C3
+        C --> C4
+    end
+    
+    subgraph "Data Layer"
+        D[Redis Cache]
+        E[TimescaleDB]
+        F[PostgreSQL]
+    end
+    
+    subgraph "Clients"
+        G[Web Dashboard]
+        H[Mobile App]
+        I[Analytics Tools]
+    end
+    
+    A -->|MQTT Publish| B
+    B -->|Subscribe| C1
+    C1 --> C2
+    C2 -->|Cache| D
+    C2 -->|Persist| E
+    C2 -->|Metadata| F
+    C2 -->|Event| C4
+    C4 -->|WebSocket| G
+    C4 -->|WebSocket| H
+    C3 -->|REST| I
+    C3 -->|Query| D
+    C3 -->|Query| E
+    C3 -->|Query| F
+    
+    style C fill:#6366f1,stroke:#4338ca,color:#fff
+    style D fill:#dc2626,stroke:#991b1b,color:#fff
+    style E fill:#f59e0b,stroke:#b45309,color:#fff
+    style F fill:#3b82f6,stroke:#1e40af,color:#fff
+    style B fill:#10b981,stroke:#059669,color:#fff
+```
+
+## Core Components
+
+### 1. MQTT Message Broker (EMQX)
+
+**Role**: Central hub for IoT device communication
+
+<CardGroup cols={2}>
+  <Card title="Specifications" icon="server">
+    - **Image**: `emqx/emqx:latest`
+    - **Ports**: 1883 (MQTT), 8083 (WebSocket), 18083 (Dashboard)
+    - **Protocol**: MQTT v3.1.1 / v5.0
+    - **QoS Levels**: 0 (sensors), 1 (actuators), 2 (alerts)
+  </Card>
+  
+  <Card title="Features" icon="list-check">
+    - High-throughput message routing
+    - WebSocket MQTT support
+    - Authentication & ACL
+    - Management dashboard
+  </Card>
+</CardGroup>
+
+**Topic Structure**:
+
+```
+GREENHOUSE/{tenantId}           # Multi-tenant sensor data
+GREENHOUSE                      # Legacy (maps to DEFAULT tenant)
+GREENHOUSE/RESPONSE             # Echo responses for verification
+greenhouse/+/actuators/#        # Actuator commands
+greenhouse/+/actuators/status   # Actuator status updates
+greenhouse/+/alerts/#           # Alert notifications
+system/events/#                 # System events
+```
+
+<Info>
+  **Multi-Tenant Routing**: Topic format `GREENHOUSE/{tenantId}` enables automatic tenant isolation. The API extracts `tenantId` from the topic path and associates all data with that tenant.
+</Info>
+
+### 2. Spring Boot API (Core Application)
+
+**Technology Stack**:
+
+<CardGroup cols={3}>
+  <Card title="Framework" icon="leaf">
+    **Spring Boot 3.5.7**
+    
+    - Spring Framework 6.x
+    - Jakarta EE 10+
+    - Java 21 LTS support
+  </Card>
+  
+  <Card title="Language" icon="code">
+    **Kotlin 2.2.21**
+    
+    - K2 compiler
+    - Null-safety
+    - Coroutines-ready
+  </Card>
+  
+  <Card title="Runtime" icon="coffee">
+    **Java 21 LTS**
+    
+    - Virtual threads
+    - Pattern matching
+    - Records
+  </Card>
+</CardGroup>
+
+**Key Libraries**:
+
+```kotlin build.gradle.kts
+dependencies {
+    // Core Spring Boot
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    
+    // MQTT Integration
+    implementation("org.springframework.integration:spring-integration-mqtt:6.5.3")
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+    
+    // WebSocket
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
+    implementation("org.springframework.integration:spring-integration-stomp")
+    
+    // Redis Cache
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("org.apache.commons:commons-pool2")
+    
+    // Database
+    implementation("org.postgresql:postgresql")
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+    
+    // JWT Authentication
+    implementation("io.jsonwebtoken:jjwt-api:0.12.5")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
+    
+    // OpenAPI Documentation
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.14")
+}
+```
+
+### 3. Dual Database Strategy
+
+The system uses **two specialized databases** for different data types:
+
+<Tabs>
+  <Tab title="TimescaleDB (Time-Series)">
+    **Purpose**: Store sensor readings with time-series optimizations
+    
+    **Specifications**:
+    - **Image**: `timescale/timescaledb:latest-pg16`
+    - **Port**: 5432
+    - **Schema**: `iot`
+    - **Hypertable**: `sensor_readings`
+    - **Chunk Interval**: 7 days
+    - **Compression**: Enabled after 7 days (saves ~90% storage)
+    - **Retention**: 2 years automatic cleanup
+    
+    **Schema**:
+    ```sql
+    CREATE TABLE iot.sensor_readings (
+        time TIMESTAMPTZ NOT NULL,
+        sensor_id VARCHAR(50) NOT NULL,
+        greenhouse_id BIGINT NOT NULL,
+        tenant_id BIGINT,
+        sensor_type VARCHAR(30) NOT NULL,
+        value DOUBLE PRECISION NOT NULL,
+        unit VARCHAR(20),
+        PRIMARY KEY (time, sensor_id)
+    );
+    
+    -- Convert to hypertable
+    SELECT create_hypertable('iot.sensor_readings', 'time', 
+        chunk_time_interval => INTERVAL '7 days');
+    
+    -- Configure compression
+    ALTER TABLE iot.sensor_readings SET (
+      timescaledb.compress,
+      timescaledb.compress_segmentby = 'sensor_id, greenhouse_id',
+      timescaledb.compress_orderby = 'time DESC'
+    );
+    
+    -- Add retention policy
+    SELECT add_retention_policy('iot.sensor_readings', 
+        INTERVAL '2 years');
+    ```
+    
+    **Indexes**:
+    ```sql
+    CREATE INDEX idx_sensor_readings_greenhouse_id 
+        ON iot.sensor_readings(greenhouse_id, time DESC);
+    
+    CREATE INDEX idx_sensor_readings_tenant_time 
+        ON iot.sensor_readings(tenant_id, time DESC) 
+        WHERE tenant_id IS NOT NULL;
+    
+    CREATE INDEX idx_sensor_readings_greenhouse_sensor_time 
+        ON iot.sensor_readings(greenhouse_id, sensor_id, time DESC);
+    ```
+    
+    **Continuous Aggregates**:
+    ```sql
+    -- Hourly aggregates (refreshed every 1 hour)
+    CREATE MATERIALIZED VIEW iot.sensor_readings_hourly
+    WITH (timescaledb.continuous) AS
+    SELECT
+        time_bucket('1 hour', time) AS bucket,
+        sensor_id,
+        greenhouse_id,
+        tenant_id,
+        AVG(value) AS avg_value,
+        MIN(value) AS min_value,
+        MAX(value) AS max_value,
+        STDDEV(value) AS stddev_value,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY value) AS median,
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95,
+        COUNT(*) AS count
+    FROM iot.sensor_readings
+    GROUP BY bucket, sensor_id, greenhouse_id, tenant_id;
+    
+    -- Daily tenant-level aggregates
+    CREATE MATERIALIZED VIEW iot.sensor_readings_daily_by_tenant
+    WITH (timescaledb.continuous) AS
+    SELECT
+        time_bucket('1 day', time) AS day,
+        tenant_id,
+        COUNT(*) AS total_readings,
+        COUNT(DISTINCT sensor_id) AS unique_sensors,
+        COUNT(DISTINCT greenhouse_id) AS unique_greenhouses
+    FROM iot.sensor_readings
+    WHERE tenant_id IS NOT NULL
+    GROUP BY day, tenant_id;
+    ```
+    
+    **Performance**:
+    - Queries on compressed data: **10-100x faster**
+    - Storage reduction: **~90%** with compression
+    - Continuous aggregates: **60x faster** than raw queries
+  </Tab>
+  
+  <Tab title="PostgreSQL (Metadata)">
+    **Purpose**: Store reference data and relationships
+    
+    **Specifications**:
+    - **Image**: `postgres:16-alpine`
+    - **Port**: 5433 (external), 5432 (internal)
+    - **Schema**: `metadata`
+    
+    **Tables**:
+    
+    <Accordion title="tenants - Master tenant registry">
+      ```sql
+      CREATE TABLE metadata.tenants (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name VARCHAR(100) NOT NULL UNIQUE,
+          company_name VARCHAR(200),
+          legal_name VARCHAR(200),
+          tax_id VARCHAR(50),
+          address TEXT,
+          city VARCHAR(100),
+          country VARCHAR(100) DEFAULT 'Spain',
+          postal_code VARCHAR(20),
+          phone VARCHAR(30),
+          email VARCHAR(100),
+          website VARCHAR(200),
+          industry VARCHAR(100),
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      ```
+    </Accordion>
+    
+    <Accordion title="greenhouses - Greenhouse definitions">
+      ```sql
+      CREATE TABLE metadata.greenhouses (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL REFERENCES tenants(id),
+          name VARCHAR(100) NOT NULL,
+          greenhouse_code VARCHAR(50) UNIQUE,
+          mqtt_topic VARCHAR(100),
+          location_coordinates GEOGRAPHY(POINT, 4326),
+          address TEXT,
+          city VARCHAR(100),
+          country VARCHAR(100) DEFAULT 'Spain',
+          timezone VARCHAR(50) DEFAULT 'Europe/Madrid',
+          area_m2 DECIMAL(10, 2),
+          is_active BOOLEAN DEFAULT true,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      CREATE INDEX idx_greenhouses_tenant_id ON metadata.greenhouses(tenant_id);
+      CREATE INDEX idx_greenhouses_code ON metadata.greenhouses(greenhouse_code);
+      ```
+    </Accordion>
+    
+    <Accordion title="sensors - Sensor devices">
+      ```sql
+      CREATE TABLE metadata.sensors (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL REFERENCES tenants(id),
+          greenhouse_id UUID REFERENCES greenhouses(id),
+          name VARCHAR(100) NOT NULL,
+          sensor_type VARCHAR(50) NOT NULL,
+          mqtt_topic VARCHAR(100),
+          unit VARCHAR(20),
+          min_value DECIMAL(10, 4),
+          max_value DECIMAL(10, 4),
+          last_seen_at TIMESTAMPTZ,
+          is_active BOOLEAN DEFAULT true,
+          metadata JSONB,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      CREATE INDEX idx_sensors_tenant_id ON metadata.sensors(tenant_id);
+      CREATE INDEX idx_sensors_greenhouse_id ON metadata.sensors(greenhouse_id);
+      CREATE INDEX idx_sensors_type ON metadata.sensors(sensor_type);
+      ```
+    </Accordion>
+    
+    <Accordion title="users - User accounts">
+      ```sql
+      CREATE TABLE metadata.users (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL REFERENCES tenants(id),
+          username VARCHAR(50) NOT NULL UNIQUE,
+          email VARCHAR(100) NOT NULL UNIQUE,
+          password_hash VARCHAR(255) NOT NULL,
+          first_name VARCHAR(100),
+          last_name VARCHAR(100),
+          role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'USER', 'VIEWER')),
+          is_active BOOLEAN DEFAULT true,
+          last_login_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      CREATE INDEX idx_users_tenant_id ON metadata.users(tenant_id);
+      CREATE INDEX idx_users_email ON metadata.users(email);
+      ```
+    </Accordion>
+    
+    <Accordion title="alerts - System alerts">
+      ```sql
+      CREATE TYPE alert_severity AS ENUM ('INFO', 'WARNING', 'ERROR', 'CRITICAL', 'LOW', 'MEDIUM', 'HIGH');
+      CREATE TYPE alert_type AS ENUM ('THRESHOLD_EXCEEDED', 'SENSOR_OFFLINE', 'ACTUATOR_FAILURE', 'SYSTEM_ERROR');
+      
+      CREATE TABLE metadata.alerts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL REFERENCES tenants(id),
+          greenhouse_id UUID REFERENCES greenhouses(id),
+          sensor_id UUID REFERENCES sensors(id),
+          alert_type alert_type NOT NULL,
+          severity alert_severity NOT NULL DEFAULT 'INFO',
+          title VARCHAR(200) NOT NULL,
+          message TEXT NOT NULL,
+          alert_data JSONB,
+          is_resolved BOOLEAN DEFAULT false,
+          resolved_at TIMESTAMPTZ,
+          resolved_by_user_id UUID REFERENCES users(id),
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      CREATE INDEX idx_alerts_tenant_id ON metadata.alerts(tenant_id);
+      CREATE INDEX idx_alerts_unresolved ON metadata.alerts(tenant_id, is_resolved) 
+          WHERE is_resolved = false;
+      ```
+    </Accordion>
+  </Tab>
+</Tabs>
+
+### 4. Redis Cache (High-Speed Access)
+
+**Purpose**: Cache last 1000 messages for instant retrieval
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear">
+    - **Image**: `redis:7-alpine`
+    - **Port**: 6379
+    - **Client**: Lettuce (async, reactive)
+    - **Pool**: max-active=100, max-idle=50, min-idle=10
+  </Card>
+  
+  <Card title="Data Structure" icon="database">
+    - **Type**: Sorted Set (ZSET)
+    - **Key**: `greenhouse:messages:{tenantId}`
+    - **Score**: timestamp (milliseconds since epoch)
+    - **Max Size**: 1000 messages (auto-trimmed)
+    - **TTL**: 24 hours
+  </Card>
+</CardGroup>
+
+**Operations** (with time complexity):
+
+```kotlin
+// Cache a message - O(log N)
+fun cacheMessage(data: RealDataDto) {
+    val key = "greenhouse:messages:${data.tenantId ?: "DEFAULT"}"
+    val score = data.timestamp.toEpochMilli().toDouble()
+    val json = objectMapper.writeValueAsString(data)
+    
+    redisTemplate.opsForZSet().add(key, json, score)
+    redisTemplate.opsForZSet().removeRange(key, 0, -1001)  // Keep last 1000
+    redisTemplate.expire(key, 24, TimeUnit.HOURS)
+}
+
+// Get recent messages - O(log N + M) where M = limit
+fun getRecentMessages(tenantId: String?, limit: Int): List<RealDataDto> {
+    val key = "greenhouse:messages:${tenantId ?: "DEFAULT"}"
+    val json = redisTemplate.opsForZSet()
+        .reverseRange(key, 0, limit - 1L)
+    return json?.mapNotNull { parseJson(it) } ?: emptyList()
+}
+
+// Get messages by time range - O(log N + M)
+fun getMessagesByTimeRange(tenantId: String?, start: Instant, end: Instant): List<RealDataDto> {
+    val key = "greenhouse:messages:${tenantId ?: "DEFAULT"}"
+    val startScore = start.toEpochMilli().toDouble()
+    val endScore = end.toEpochMilli().toDouble()
+    
+    val json = redisTemplate.opsForZSet()
+        .reverseRangeByScore(key, startScore, endScore)
+    return json?.mapNotNull { parseJson(it) } ?: emptyList()
+}
+
+// Get latest message - O(log N)
+fun getLatestMessage(tenantId: String?): RealDataDto? {
+    val key = "greenhouse:messages:${tenantId ?: "DEFAULT"}"
+    val json = redisTemplate.opsForZSet()
+        .reverseRange(key, 0, 0)?.firstOrNull()
+    return json?.let { parseJson(it) }
+}
+```
+
+**Performance Characteristics**:
+- Response time: **1-5ms** for cached queries
+- Memory-efficient: Compressed JSON strings
+- Automatic eviction: Oldest messages removed when > 1000
+- Self-renewing TTL: 24-hour expiration refreshed on each write
+
+## Data Flow Pipeline
+
+### Message Processing Flow
+
+```mermaid
+sequenceDiagram
+    participant Sensor as IoT Sensor
+    participant EMQX as EMQX Broker
+    participant Listener as GreenhouseDataListener
+    participant Processor as MqttMessageProcessor
+    participant Redis as Redis Cache
+    participant TimescaleDB as TimescaleDB
+    participant PostgreSQL as PostgreSQL
+    participant Publisher as EventPublisher
+    participant WebSocket as WebSocket Handler
+    participant Client as WebSocket Client
+    
+    Sensor->>EMQX: Publish to GREENHOUSE/SARA
+    EMQX->>Listener: Message arrived
+    Listener->>Listener: Extract tenantId from topic
+    Listener->>Processor: processGreenhouseData(payload, tenantId)
+    
+    Processor->>Processor: Parse JSON (22 fields)
+    Processor->>Redis: Cache RealDataDto (ZADD)
+    Redis-->>Processor: Cached
+    
+    Processor->>Processor: Transform to 22 SensorReading entities
+    Processor->>TimescaleDB: Batch INSERT (saveAll)
+    TimescaleDB-->>Processor: Persisted
+    
+    Processor->>Publisher: publishEvent(GreenhouseMessageEvent)
+    Publisher->>WebSocket: @EventListener triggered
+    WebSocket->>Client: Broadcast RealDataDto via STOMP
+    
+    Processor->>EMQX: Publish to GREENHOUSE/RESPONSE (echo)
+    EMQX->>Sensor: Echo received
+```
+
+### Step-by-Step Processing
+
+<Steps>
+  <Step title="MQTT Message Reception">
+    **Component**: `GreenhouseDataListener.kt`
+    
+    ```kotlin
+    @ServiceActivator(inputChannel = "mqttInputChannel")
+    fun handleGreenhouseData(message: Message<*>) {
+        val topic = message.headers[MqttHeaders.RECEIVED_TOPIC] as String
+        val payload = String(message.payload as ByteArray)
+        
+        // Extract tenantId from topic path
+        val tenantId = when {
+            topic.startsWith("GREENHOUSE/") -> 
+                topic.substringAfter("GREENHOUSE/").takeWhile { it != '/' }
+            topic == "GREENHOUSE" -> "DEFAULT"  // Legacy compatibility
+            else -> "UNKNOWN"
+        }
+        
+        mqttMessageProcessor.processGreenhouseData(payload, tenantId)
+    }
+    ```
+  </Step>
+  
+  <Step title="JSON Parsing">
+    **Component**: `MqttMessageProcessor.kt`
+    
+    ```kotlin
+    val messageDto = payload.toRealDataDto(
+        timestamp = Instant.now(), 
+        tenantId = tenantId
+    )
+    ```
+    
+    Parses JSON with **22 numeric fields**:
+    - 6 fields: Temperature and humidity for 3 greenhouses
+    - 12 fields: Sectors (4 per greenhouse)
+    - 3 fields: Extractors (1 per greenhouse)
+    - 1 field: Reserve
+  </Step>
+  
+  <Step title="Redis Caching">
+    ```kotlin
+    cacheService.cacheMessage(messageDto)
+    ```
+    
+    Stores in Sorted Set with timestamp as score. Automatically trims to last 1000 messages.
+  </Step>
+  
+  <Step title="Data Transformation">
+    ```kotlin
+    val readings = mutableListOf<SensorReading>()
+    val jsonMap = objectMapper.readValue<Map<String, Any?>>(payload)
+    
+    jsonMap.forEach { (key, value) ->
+        if (value is Number) {
+            readings.add(SensorReading(
+                time = messageDto.timestamp,
+                sensorId = key,
+                greenhouseId = greenhouseId,
+                tenantId = tenantId,
+                sensorType = determineSensorType(key),
+                value = value.toDouble(),
+                unit = determineUnit(key)
+            ))
+        }
+    }
+    ```
+    
+    **Result**: 1 JSON payload → 22 `SensorReading` entities
+  </Step>
+  
+  <Step title="TimescaleDB Persistence">
+    ```kotlin
+    @Transactional("timescaleTransactionManager")
+    repository.saveAll(readings)  // Batch INSERT (1 query)
+    ```
+    
+    Uses batch insert for performance: **22 rows inserted in 1 query** instead of 22 separate queries.
+  </Step>
+  
+  <Step title="Event Publishing">
+    ```kotlin
+    publisher.publishEvent(
+        GreenhouseMessageEvent(source = this, message = messageDto)
+    )
+    ```
+    
+    Spring `ApplicationEvent` decouples MQTT processing from WebSocket broadcasting.
+  </Step>
+  
+  <Step title="WebSocket Broadcasting">
+    **Component**: `GreenhouseWebSocketHandler.kt`
+    
+    ```kotlin
+    @EventListener
+    fun handleGreenhouseMessage(event: GreenhouseMessageEvent) {
+        messagingTemplate.convertAndSend(
+            "/topic/greenhouse/messages",
+            event.message  // RealDataDto (22 fields)
+        )
+    }
+    ```
+    
+    Broadcasts to all WebSocket clients subscribed to `/topic/greenhouse/messages`.
+  </Step>
+  
+  <Step title="MQTT Echo (Optional)">
+    ```kotlin
+    mqttPublishService.publishToResponseTopic(messageDto.toJson())
+    ```
+    
+    Echoes message to `GREENHOUSE/RESPONSE` topic for hardware verification.
+  </Step>
+</Steps>
+
+## API Endpoints
+
+### Authentication Endpoints
+
+<CodeGroup>
+```bash POST /api/v1/auth/login
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin@example.com",
+    "password": "your_password"
+  }'
+
+# Response
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "type": "Bearer",
+  "expiresIn": 86400
+}
+```
+
+```bash POST /api/v1/auth/register
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "companyName": "My Farm",
+    "email": "admin@myfarm.com",
+    "password": "secure_password",
+    "firstName": "John",
+    "lastName": "Doe"
+  }'
+```
+</CodeGroup>
+
+### Greenhouse Data Endpoints
+
+<CodeGroup>
+```bash GET /api/v1/greenhouse/messages/recent
+# Get last 100 messages for tenant SARA
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/greenhouse/messages/recent?tenantId=SARA&limit=100"
+
+# Response
+[
+  {
+    "timestamp": "2025-03-03T21:30:00Z",
+    "TEMPERATURA INVERNADERO 01": 24.5,
+    "HUMEDAD INVERNADERO 01": 65.3,
+    "TEMPERATURA INVERNADERO 02": 23.8,
+    "HUMEDAD INVERNADERO 02": 68.2,
+    "TEMPERATURA INVERNADERO 03": 25.1,
+    "HUMEDAD INVERNADERO 03": 64.7,
+    "INVERNADERO_01_SECTOR_01": 1.0,
+    "INVERNADERO_01_SECTOR_02": 0.0,
+    // ... 14 more fields
+    "greenhouseId": null,
+    "tenantId": "SARA"
+  }
+]
+```
+
+```bash GET /api/v1/greenhouse/messages/range
+# Get messages in time range
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/greenhouse/messages/range?tenantId=SARA&from=2025-03-03T10:00:00Z&to=2025-03-03T12:00:00Z"
+```
+
+```bash GET /api/v1/greenhouse/cache/info
+# Check Redis cache status
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/greenhouse/cache/info?tenantId=SARA"
+
+# Response
+{
+  "totalMessages": 1000,
+  "ttlSeconds": 86400,
+  "maxCapacity": 1000,
+  "utilizationPercentage": 100.0,
+  "cacheType": "Redis Sorted Set",
+  "oldestMessageTimestamp": "2025-03-02T21:30:00Z",
+  "newestMessageTimestamp": "2025-03-03T21:30:00Z"
+}
+```
+</CodeGroup>
+
+### Sensor Reading Endpoints
+
+<CodeGroup>
+```bash GET /api/v1/sensors/latest
+# Get latest sensor readings
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/sensors/latest?greenhouseId=001&limit=10"
+```
+
+```bash GET /api/v1/sensors/by-sensor/{sensorId}
+# Get readings for specific sensor
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/sensors/by-sensor/TEMPERATURA%20INVERNADERO%2001?hoursAgo=24"
+```
+
+```bash GET /api/v1/sensors/stats/{sensorId}
+# Get sensor statistics (min, max, avg)
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8080/api/v1/sensors/stats/TEMPERATURA%20INVERNADERO%2001?hoursAgo=24"
+
+# Response
+{
+  "minValue": 18.5,
+  "maxValue": 28.3,
+  "avgValue": 23.7,
+  "stdDev": 2.1,
+  "count": 1440
+}
+```
+</CodeGroup>
+
+## WebSocket Real-Time Streaming
+
+### Connection Setup
+
+<CodeGroup>
+```javascript JavaScript (SockJS + STOMP)
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+
+<script>
+// Create WebSocket connection
+const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+const stompClient = Stomp.over(socket);
+
+// Connect to the WebSocket
+stompClient.connect({}, function(frame) {
+  console.log('Connected: ' + frame);
+  
+  // Subscribe to greenhouse messages
+  stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+    const data = JSON.parse(message.body);
+    console.log('New sensor reading:', data);
+    
+    // Update your UI here
+    updateDashboard(data);
+  });
+});
+
+function updateDashboard(data) {
+  document.getElementById('temp01').innerText = data['TEMPERATURA INVERNADERO 01'] + '°C';
+  document.getElementById('humidity01').innerText = data['HUMEDAD INVERNADERO 01'] + '%';
+  // ... update other fields
+}
+</script>
+```
+
+```kotlin Kotlin Multiplatform
+import org.hildan.krossbow.stomp.StompClient
+import org.hildan.krossbow.websocket.okhttp.OkHttpWebSocketClient
+
+val client = StompClient(OkHttpWebSocketClient())
+val session = client.connect("ws://localhost:8080/ws/greenhouse")
+
+// Subscribe to messages
+val subscription = session.subscribe("/topic/greenhouse/messages")
+subscription.collect { message ->
+    val data = Json.decodeFromString<RealDataDto>(message.bodyAsText)
+    println("Temperature: ${data.temperaturaInvernadero01}°C")
+}
+```
+
+```python Python (websockets)
+import asyncio
+import websockets
+import json
+
+async def listen_to_greenhouse():
+    uri = "ws://localhost:8080/ws/greenhouse"
+    async with websockets.connect(uri) as websocket:
+        # Subscribe to topic
+        subscribe_message = {
+            "command": "SUBSCRIBE",
+            "destination": "/topic/greenhouse/messages",
+            "id": "sub-0"
+        }
+        await websocket.send(json.dumps(subscribe_message))
+        
+        # Listen for messages
+        async for message in websocket:
+            data = json.loads(message)
+            print(f"Temperature: {data['TEMPERATURA INVERNADERO 01']}°C")
+
+asyncio.run(listen_to_greenhouse())
+```
+</CodeGroup>
+
+### WebSocket Topics
+
+| Topic | Description | Message Type |
+|-------|-------------|-------------|
+| `/topic/greenhouse/messages` | Real-time sensor readings | `RealDataDto` (22 fields) |
+| `/topic/greenhouse/statistics` | Aggregated statistics | `GreenhouseSummaryDto` |
+| `/topic/alerts` | System alerts | `AlertDto` |
+
+<Info>
+  **Broadcasting Frequency**: Messages are broadcast as they arrive via MQTT (typically every 5-10 seconds per greenhouse).
+</Info>
+
+## Security Architecture
+
+### JWT Authentication
+
+<Steps>
+  <Step title="User Login">
+    Client sends username + password to `/api/v1/auth/login`
+  </Step>
+  
+  <Step title="Token Generation">
+    Server validates credentials and generates JWT token:
+    
+    ```kotlin
+    val token = Jwts.builder()
+        .setSubject(user.username)
+        .claim("tenantId", user.tenantId)
+        .claim("role", user.role)
+        .setIssuedAt(Date())
+        .setExpiration(Date(System.currentTimeMillis() + 86400000)) // 24h
+        .signWith(secretKey, SignatureAlgorithm.HS256)
+        .compact()
+    ```
+  </Step>
+  
+  <Step title="Client Stores Token">
+    Client stores token in localStorage or secure storage
+  </Step>
+  
+  <Step title="Authenticated Requests">
+    Client includes token in Authorization header:
+    
+    ```
+    Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+    ```
+  </Step>
+  
+  <Step title="Token Validation">
+    `JwtAuthenticationFilter` intercepts requests and validates token:
+    
+    ```kotlin
+    val claims = Jwts.parserBuilder()
+        .setSigningKey(secretKey)
+        .build()
+        .parseClaimsJws(token)
+        .body
+    
+    val username = claims.subject
+    val tenantId = claims["tenantId"] as String
+    ```
+  </Step>
+</Steps>
+
+### Multi-Tenant Data Isolation
+
+<Tabs>
+  <Tab title="Request-Level Filtering">
+    All queries automatically filter by tenant:
+    
+    ```kotlin
+    // Retrieve authenticated user's tenantId from JWT
+    val tenantId = SecurityContextHolder.getContext()
+        .authentication.principal as UserDetails
+    
+    // Query with tenant filter
+    val greenhouses = greenhouseRepository
+        .findByTenantId(tenantId)
+    ```
+  </Tab>
+  
+  <Tab title="MQTT Topic Isolation">
+    Tenant extracted from topic path:
+    
+    ```kotlin
+    // GREENHOUSE/SARA → tenantId = "SARA"
+    val tenantId = topic.substringAfter("GREENHOUSE/")
+    ```
+  </Tab>
+  
+  <Tab title="Database-Level Isolation">
+    All queries include tenant_id WHERE clause:
+    
+    ```sql
+    -- Automatic tenant filtering
+    SELECT * FROM iot.sensor_readings 
+    WHERE tenant_id = :tenantId 
+      AND time >= NOW() - INTERVAL '1 day';
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Important**: Existing sensor data has `NULL tenant_id` and requires manual migration. See Migration Guide for steps to populate tenant associations.
+</Warning>
+
+## Performance Optimization
+
+### Query Performance
+
+<CardGroup cols={2}>
+  <Card title="Redis Cache" icon="gauge-high">
+    **1-5ms** response time
+    
+    For recent data (last 1000 messages)
+  </Card>
+  
+  <Card title="TimescaleDB" icon="clock">
+    **10-50ms** response time
+    
+    For historical queries with indexes
+  </Card>
+  
+  <Card title="Continuous Aggregates" icon="chart-line">
+    **60x faster** than raw queries
+    
+    Pre-computed hourly/daily stats
+  </Card>
+  
+  <Card title="Batch Inserts" icon="layer-group">
+    **22x faster** than individual inserts
+    
+    Single query for 22 rows
+  </Card>
+</CardGroup>
+
+### Scaling Strategies
+
+<Steps>
+  <Step title="Horizontal API Scaling">
+    Deploy multiple API instances behind load balancer:
+    
+    ```yaml kubernetes
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: invernaderos-api
+    spec:
+      replicas: 3  # Run 3 instances
+      selector:
+        matchLabels:
+          app: invernaderos-api
+      template:
+        # ... pod spec
+    ```
+  </Step>
+  
+  <Step title="Redis Cluster (Future)">
+    Migrate from single Redis instance to Redis Cluster for high availability
+  </Step>
+  
+  <Step title="TimescaleDB Replication">
+    Configure TimescaleDB streaming replication for read replicas
+  </Step>
+  
+  <Step title="MQTT Broker Clustering">
+    EMQX Enterprise supports clustering for high availability
+  </Step>
+</Steps>
+
+## Monitoring & Observability
+
+### Health Checks
+
+<CodeGroup>
+```bash Spring Boot Actuator
+# Health check
+curl http://localhost:8080/actuator/health
+
+# Response
+{
+  "status": "UP",
+  "components": {
+    "db": {"status": "UP"},
+    "redis": {"status": "UP"},
+    "diskSpace": {"status": "UP"}
+  }
+}
+```
+
+```bash Metrics
+# Get all metrics
+curl http://localhost:8080/actuator/metrics
+
+# Specific metric
+curl http://localhost:8080/actuator/metrics/jvm.memory.used
+
+# Prometheus format
+curl http://localhost:8080/actuator/prometheus
+```
+
+```bash Docker Health Checks
+# Check API health
+docker exec invernaderos-api curl -f http://localhost:8080/actuator/health
+
+# Check TimescaleDB
+docker exec invernaderos-timescaledb pg_isready -U admin
+
+# Check Redis
+docker exec invernaderos-redis redis-cli ping
+```
+</CodeGroup>
+
+### Logging
+
+<Tabs>
+  <Tab title="Application Logs">
+    ```yaml application.yaml
+    logging:
+      level:
+        root: INFO
+        com.apptolast.invernaderos: DEBUG
+        org.springframework.integration.mqtt: DEBUG
+      pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss} %5p [%15.15t] %-40.40logger : %m%n"
+    ```
+    
+    View logs:
+    ```bash
+    docker-compose logs -f api
+    ```
+  </Tab>
+  
+  <Tab title="MQTT Logs">
+    ```bash
+    # EMQX logs
+    docker-compose logs -f emqx
+    
+    # Monitor MQTT messages in real-time
+    mosquitto_sub -h localhost -p 1883 \
+      -u mqtt_user -P <password> \
+      -t "#" -v
+    ```
+  </Tab>
+  
+  <Tab title="Database Logs">
+    ```bash
+    # TimescaleDB logs
+    docker-compose logs -f timescaledb
+    
+    # PostgreSQL logs
+    docker-compose logs -f postgresql-metadata
+    
+    # Slow query log (TimescaleDB)
+    docker exec -it invernaderos-timescaledb \
+      psql -U admin -d greenhouse_timeseries \
+      -c "SELECT query, calls, total_time, mean_time 
+          FROM pg_stat_statements 
+          ORDER BY mean_time DESC LIMIT 10;"
+    ```
+  </Tab>
+</Tabs>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Explore all REST endpoints
+  </Card>
+  <Card title="WebSocket Guide" icon="satellite-dish" href="/websocket">
+    Connect to real-time stream
+  </Card>
+  <Card title="Deployment" icon="server" href="/deployment">
+    Deploy to production
+  </Card>
+</CardGroup>
+
+---
+
+**Architecture designed for** high throughput • low latency • horizontal scaling • multi-tenancy • real-time streaming

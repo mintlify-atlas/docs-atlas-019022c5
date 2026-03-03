@@ -1,0 +1,562 @@
+---
+title: 'Message Payload Format'
+description: 'JSON structure for greenhouse sensor data with 22 fields'
+icon: 'file-code'
+---
+
+## Overview
+
+The Invernaderos API uses `RealDataDto` as the standard message format for greenhouse sensor data. Each message contains **22 fields** representing temperature, humidity, sector irrigation, and extractor status across 3 greenhouses.
+
+<Info>
+The payload structure is defined in `RealDataDto.kt` with Jackson `@JsonProperty` annotations for mixed naming conventions.
+</Info>
+
+## Message Structure
+
+### Complete Schema
+
+```json Example Payload
+{
+  "timestamp": "2025-11-16T10:30:00Z",
+  "TEMPERATURA INVERNADERO 01": 25.5,
+  "HUMEDAD INVERNADERO 01": 65.2,
+  "TEMPERATURA INVERNADERO 02": 26.1,
+  "HUMEDAD INVERNADERO 02": 63.8,
+  "TEMPERATURA INVERNADERO 03": 24.9,
+  "HUMEDAD INVERNADERO 03": 67.5,
+  "INVERNADERO_01_SECTOR_01": 1.0,
+  "INVERNADERO_01_SECTOR_02": 0.0,
+  "INVERNADERO_01_SECTOR_03": 1.0,
+  "INVERNADERO_01_SECTOR_04": 0.0,
+  "INVERNADERO_02_SECTOR_01": 1.0,
+  "INVERNADERO_02_SECTOR_02": 1.0,
+  "INVERNADERO_02_SECTOR_03": 0.0,
+  "INVERNADERO_02_SECTOR_04": 1.0,
+  "INVERNADERO_03_SECTOR_01": 0.0,
+  "INVERNADERO_03_SECTOR_02": 1.0,
+  "INVERNADERO_03_SECTOR_03": 1.0,
+  "INVERNADERO_03_SECTOR_04": 0.0,
+  "INVERNADERO_01_EXTRACTOR": 0.0,
+  "INVERNADERO_02_EXTRACTOR": 1.0,
+  "INVERNADERO_03_EXTRACTOR": 0.0,
+  "RESERVA": 0.0,
+  "greenhouseId": "550e8400-e29b-41d4-a716-446655440000",
+  "tenantId": "SARA"
+}
+```
+
+## Field Groups
+
+### Temperature & Humidity (6 fields)
+
+Environmental sensors for 3 greenhouses:
+
+<Tabs>
+  <Tab title="Greenhouse 01">
+    | Field | Type | Unit | Description |
+    |-------|------|------|-------------|
+    | `TEMPERATURA INVERNADERO 01` | `Double?` | °C | Temperature in greenhouse 1 |
+    | `HUMEDAD INVERNADERO 01` | `Double?` | % | Humidity in greenhouse 1 |
+
+    **Typical Range:**
+    - Temperature: 15-30°C
+    - Humidity: 40-80%
+
+    **Example:**
+    ```json
+    {
+      "TEMPERATURA INVERNADERO 01": 25.5,
+      "HUMEDAD INVERNADERO 01": 65.2
+    }
+    ```
+  </Tab>
+
+  <Tab title="Greenhouse 02">
+    | Field | Type | Unit | Description |
+    |-------|------|------|-------------|
+    | `TEMPERATURA INVERNADERO 02` | `Double?` | °C | Temperature in greenhouse 2 |
+    | `HUMEDAD INVERNADERO 02` | `Double?` | % | Humidity in greenhouse 2 |
+
+    **Typical Range:**
+    - Temperature: 15-30°C
+    - Humidity: 40-80%
+
+    **Example:**
+    ```json
+    {
+      "TEMPERATURA INVERNADERO 02": 26.1,
+      "HUMEDAD INVERNADERO 02": 63.8
+    }
+    ```
+  </Tab>
+
+  <Tab title="Greenhouse 03">
+    | Field | Type | Unit | Description |
+    |-------|------|------|-------------|
+    | `TEMPERATURA INVERNADERO 03` | `Double?` | °C | Temperature in greenhouse 3 |
+    | `HUMEDAD INVERNADERO 03` | `Double?` | % | Humidity in greenhouse 3 |
+
+    **Typical Range:**
+    - Temperature: 15-30°C
+    - Humidity: 40-80%
+
+    **Example:**
+    ```json
+    {
+      "TEMPERATURA INVERNADERO 03": 24.9,
+      "HUMEDAD INVERNADERO 03": 67.5
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Irrigation Sectors (12 fields)
+
+Binary status (0=OFF, 1=ON) for 4 sectors per greenhouse:
+
+<Warning>
+Field names use **UNDERSCORES** (`INVERNADERO_01_SECTOR_01`), unlike temperature/humidity which use **SPACES**.
+</Warning>
+
+| Greenhouse | Sectors |
+|------------|----------|
+| **01** | `INVERNADERO_01_SECTOR_01` through `INVERNADERO_01_SECTOR_04` |
+| **02** | `INVERNADERO_02_SECTOR_01` through `INVERNADERO_02_SECTOR_04` |
+| **03** | `INVERNADERO_03_SECTOR_01` through `INVERNADERO_03_SECTOR_04` |
+
+**Values:**
+- `0.0` or `0` - Sector irrigation OFF
+- `1.0` or `1` - Sector irrigation ON
+
+**Example:**
+```json
+{
+  "INVERNADERO_01_SECTOR_01": 1.0,  // ON
+  "INVERNADERO_01_SECTOR_02": 0.0,  // OFF
+  "INVERNADERO_01_SECTOR_03": 1.0,  // ON
+  "INVERNADERO_01_SECTOR_04": 0.0   // OFF
+}
+```
+
+### Extractors (3 fields)
+
+Ventilation extractor status (0=OFF, 1=ON):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `INVERNADERO_01_EXTRACTOR` | `Double?` | Extractor in greenhouse 1 (0=OFF, 1=ON) |
+| `INVERNADERO_02_EXTRACTOR` | `Double?` | Extractor in greenhouse 2 (0=OFF, 1=ON) |
+| `INVERNADERO_03_EXTRACTOR` | `Double?` | Extractor in greenhouse 3 (0=OFF, 1=ON) |
+
+**Example:**
+```json
+{
+  "INVERNADERO_01_EXTRACTOR": 0.0,  // OFF
+  "INVERNADERO_02_EXTRACTOR": 1.0,  // ON (extracting air)
+  "INVERNADERO_03_EXTRACTOR": 0.0   // OFF
+}
+```
+
+### Metadata Fields (4 fields)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `timestamp` | `Instant` | ✅ Yes | ISO-8601 timestamp (auto-generated if omitted) |
+| `greenhouseId` | `String?` | ❌ Optional | UUID of greenhouse (auto-assigned by API) |
+| `tenantId` | `String?` | ❌ Optional | Tenant identifier for multi-tenancy |
+| `RESERVA` | `Double?` | ❌ Optional | Reserved field for future use |
+
+**Timestamp Format:**
+```json
+"timestamp": "2025-11-16T10:30:00Z"  // ISO-8601 UTC
+"timestamp": "2025-11-16T10:30:00.123Z"  // With milliseconds
+```
+
+## Data Types & Validation
+
+### Type Definitions
+
+From `RealDataDto.kt:8-82`:
+
+```kotlin
+data class RealDataDto(
+    val timestamp: Instant,
+    @JsonProperty("TEMPERATURA INVERNADERO 01") val temperaturaInvernadero01: Double? = null,
+    @JsonProperty("HUMEDAD INVERNADERO 01") val humedadInvernadero01: Double? = null,
+    // ... 18 more fields ...
+    @JsonProperty("RESERVA") val reserva: Double? = null,
+    val greenhouseId: String? = null,
+    val tenantId: String? = null
+)
+```
+
+### Validation Rules
+
+Configured in `staging.validation_rules` table:
+
+<Tabs>
+  <Tab title="Temperature">
+    ```sql
+    SELECT * FROM staging.validation_rules WHERE sensor_type = 'TEMPERATURE';
+    ```
+
+    | Rule | Value |
+    |------|-------|
+    | **Min Value** | -50°C |
+    | **Max Value** | 100°C |
+    | **Typical Range** | 15-30°C |
+    | **Unit** | °C (Celsius) |
+
+    **Validation Logic:**
+    ```kotlin
+    if (value < -50 || value > 100) {
+        throw ValidationException("Temperature out of range: $value°C")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Humidity">
+    ```sql
+    SELECT * FROM staging.validation_rules WHERE sensor_type = 'HUMIDITY';
+    ```
+
+    | Rule | Value |
+    |------|-------|
+    | **Min Value** | 0% |
+    | **Max Value** | 100% |
+    | **Typical Range** | 40-80% |
+    | **Unit** | % (Relative Humidity) |
+
+    **Validation Logic:**
+    ```kotlin
+    if (value < 0 || value > 100) {
+        throw ValidationException("Humidity out of range: $value%")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Sectors/Extractors">
+    ```sql
+    SELECT * FROM staging.validation_rules WHERE sensor_type = 'SECTOR';
+    ```
+
+    | Rule | Value |
+    |------|-------|
+    | **Min Value** | 0 (OFF) |
+    | **Max Value** | 1 (ON) |
+    | **Data Type** | Binary (0 or 1) |
+    | **Unit** | None |
+
+    **Validation Logic:**
+    ```kotlin
+    if (value != 0.0 && value != 1.0) {
+        throw ValidationException("Sector/Extractor must be 0 or 1: $value")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+The API uses **nullable types** (`Double?`). Missing fields default to `null`, not `0.0`.
+</Warning>
+
+## Message Processing
+
+### API Processing Flow
+
+From `MqttMessageProcessor.kt:128-260`:
+
+<Steps>
+  <Step title="Receive MQTT Message">
+    Message arrives on topic `GREENHOUSE/{tenantId}` or legacy `GREENHOUSE`.
+
+    ```kotlin
+    fun processGreenhouseData(jsonPayload: String, tenantId: String)
+    ```
+  </Step>
+
+  <Step title="Parse JSON to DTO">
+    Convert JSON to `RealDataDto` using Jackson:
+
+    ```kotlin
+    val messageDto = jsonPayload.toRealDataDto(
+        timestamp = Instant.now(),
+        greenhouseId = tenantId,
+        tenantId = tenantId
+    )
+    ```
+  </Step>
+
+  <Step title="Cache in Redis">
+    Store complete message in Redis Sorted Set:
+
+    ```kotlin
+    greenhouseCacheService.cacheMessage(messageDto)
+    // Stored in: "greenhouse:messages:{tenantId}"
+    ```
+  </Step>
+
+  <Step title="Transform to SensorReading Entities">
+    Split 22 fields into individual time-series records:
+
+    ```kotlin
+    data.properties().forEach { (key, value) ->
+        SensorReading(
+            time = timestamp,
+            sensorId = key,  // "TEMPERATURA INVERNADERO 01"
+            greenhouseId = greenhouse.id,  // UUID
+            tenantId = tenant.id,  // UUID
+            sensorType = determineSensorType(key),  // "TEMPERATURE"
+            value = value.asDouble(),
+            unit = determineUnit(key)  // "°C"
+        )
+    }
+    ```
+
+    **Result:** 22 JSON fields → 22 database rows
+  </Step>
+
+  <Step title="Save to TimescaleDB">
+    Batch insert to `iot.sensor_readings` hypertable:
+
+    ```kotlin
+    sensorReadingRepository.saveAll(sensorReadings)
+    ```
+  </Step>
+
+  <Step title="Broadcast via WebSocket">
+    Publish to `/topic/greenhouse/messages` for real-time clients:
+
+    ```kotlin
+    eventPublisher.publishEvent(GreenhouseMessageEvent(this, messageDto))
+    ```
+  </Step>
+</Steps>
+
+## Code Examples
+
+### Publishing Messages
+
+<CodeGroup>
+```kotlin Kotlin
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+
+val mapper = jacksonObjectMapper()
+val sensorData = mapOf(
+    "TEMPERATURA INVERNADERO 01" to 25.5,
+    "HUMEDAD INVERNADERO 01" to 65.2,
+    "INVERNADERO_01_SECTOR_01" to 1.0,
+    "INVERNADERO_01_EXTRACTOR" to 0.0
+)
+
+val payload = mapper.writeValueAsString(sensorData)
+client.publish("GREENHOUSE/SARA", payload)
+```
+
+```javascript JavaScript
+const sensorData = {
+  "TEMPERATURA INVERNADERO 01": 25.5,
+  "HUMEDAD INVERNADERO 01": 65.2,
+  "INVERNADERO_01_SECTOR_01": 1.0,
+  "INVERNADERO_01_EXTRACTOR": 0.0
+};
+
+const payload = JSON.stringify(sensorData);
+client.publish('GREENHOUSE/SARA', payload, { qos: 0 });
+```
+
+```python Python
+import json
+
+sensor_data = {
+    "TEMPERATURA INVERNADERO 01": 25.5,
+    "HUMEDAD INVERNADERO 01": 65.2,
+    "INVERNADERO_01_SECTOR_01": 1.0,
+    "INVERNADERO_01_EXTRACTOR": 0.0
+}
+
+payload = json.dumps(sensor_data)
+client.publish("GREENHOUSE/SARA", payload, qos=0)
+```
+</CodeGroup>
+
+### Parsing Received Messages
+
+<CodeGroup>
+```kotlin Kotlin
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.fasterxml.jackson.module.kotlin.readValue
+
+val mapper = jacksonObjectMapper()
+
+client.subscribe("GREENHOUSE/+") { topic, message ->
+    val payload = String(message.payload)
+    val data = mapper.readValue<Map<String, Any>>(payload)
+    
+    val temp01 = data["TEMPERATURA INVERNADERO 01"] as? Double
+    val humidity01 = data["HUMEDAD INVERNADERO 01"] as? Double
+    
+    println("Temp: $temp01°C, Humidity: $humidity01%")
+}
+```
+
+```javascript JavaScript
+client.on('message', (topic, message) => {
+  const data = JSON.parse(message.toString());
+  
+  const temp01 = data['TEMPERATURA INVERNADERO 01'];
+  const humidity01 = data['HUMEDAD INVERNADERO 01'];
+  
+  console.log(`Temp: ${temp01}°C, Humidity: ${humidity01}%`);
+});
+```
+
+```python Python
+import json
+
+def on_message(client, userdata, msg):
+    data = json.loads(msg.payload.decode('utf-8'))
+    
+    temp01 = data.get('TEMPERATURA INVERNADERO 01')
+    humidity01 = data.get('HUMEDAD INVERNADERO 01')
+    
+    print(f"Temp: {temp01}°C, Humidity: {humidity01}%")
+
+client.on_message = on_message
+```
+</CodeGroup>
+
+### Validating Messages
+
+```kotlin Validator.kt
+fun validateSensorData(data: Map<String, Any?>): List<String> {
+    val errors = mutableListOf<String>()
+    
+    // Validate temperature fields
+    listOf("01", "02", "03").forEach { num ->
+        val temp = data["TEMPERATURA INVERNADERO $num"] as? Double
+        if (temp != null && (temp < -50 || temp > 100)) {
+            errors.add("Temperature $num out of range: $temp°C")
+        }
+        
+        val humidity = data["HUMEDAD INVERNADERO $num"] as? Double
+        if (humidity != null && (humidity < 0 || humidity > 100)) {
+            errors.add("Humidity $num out of range: $humidity%")
+        }
+    }
+    
+    // Validate sectors
+    listOf("01", "02", "03").forEach { greenhouse ->
+        listOf("01", "02", "03", "04").forEach { sector ->
+            val value = data["INVERNADERO_${greenhouse}_SECTOR_${sector}"] as? Double
+            if (value != null && value != 0.0 && value != 1.0) {
+                errors.add("Sector ${greenhouse}_${sector} must be 0 or 1: $value")
+            }
+        }
+    }
+    
+    return errors
+}
+```
+
+## Common Patterns
+
+### Partial Updates
+
+You can send **partial payloads** with only changed fields:
+
+```json Partial Payload Example
+{
+  "TEMPERATURA INVERNADERO 01": 26.3,
+  "INVERNADERO_01_SECTOR_01": 1.0
+}
+```
+
+**API Behavior:**
+- Missing fields are stored as `null`
+- Only provided fields are inserted into TimescaleDB
+- Redis cache stores the complete DTO (with nulls)
+
+### Bulk Publishing
+
+For high-frequency sensors, batch multiple readings:
+
+```javascript Bulk Publishing
+const readings = [
+  { "TEMPERATURA INVERNADERO 01": 25.5, timestamp: "2025-11-16T10:30:00Z" },
+  { "TEMPERATURA INVERNADERO 01": 25.6, timestamp: "2025-11-16T10:30:05Z" },
+  { "TEMPERATURA INVERNADERO 01": 25.7, timestamp: "2025-11-16T10:30:10Z" }
+];
+
+readings.forEach(reading => {
+  client.publish('GREENHOUSE/SARA', JSON.stringify(reading));
+});
+```
+
+<Info>
+The API applies **rate limiting** to reduce database load. See `SensorRateLimiter` for throttling logic.
+</Info>
+
+### Field Naming Gotcha
+
+<Warning>
+**CRITICAL:** Field names use **inconsistent separators**:
+
+- Temperature/Humidity: **SPACES** (`"TEMPERATURA INVERNADERO 01"`)
+- Sectors/Extractors: **UNDERSCORES** (`"INVERNADERO_01_SECTOR_01"`)
+
+This matches the actual hardware output format. **Do NOT change** field names or hardware integration will break.
+</Warning>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Fields Not Parsed (Null Values)">
+    **Cause:** Incorrect field names (spaces vs underscores)
+
+    **Solution:**
+    - Temperature/Humidity: Use **SPACES** (`"TEMPERATURA INVERNADERO 01"`)
+    - Sectors/Extractors: Use **UNDERSCORES** (`"INVERNADERO_01_SECTOR_01"`)
+    - Check JSON keys match exactly (case-sensitive)
+  </Accordion>
+
+  <Accordion title="Validation Errors">
+    **Cause:** Values outside acceptable ranges
+
+    **Solution:**
+    - Temperature: -50 to 100°C
+    - Humidity: 0 to 100%
+    - Sectors/Extractors: Only 0 or 1
+    - Check `staging.validation_rules` table for limits
+  </Accordion>
+
+  <Accordion title="Timestamp Issues">
+    **Cause:** Invalid ISO-8601 format
+
+    **Solution:**
+    - Use UTC timezone: `2025-11-16T10:30:00Z`
+    - Or omit timestamp (API generates current time)
+    - Avoid non-standard formats: `2025/11/16 10:30:00`
+  </Accordion>
+
+  <Accordion title="Data Not Saved to Database">
+    **Cause:** Rate limiting or validation failure
+
+    **Solution:**
+    - Check API logs for validation errors
+    - Verify `SensorRateLimiter` allows save frequency
+    - Confirm greenhouse/tenant exists in database
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setup MQTT Client" icon="plug" href="./setup">
+    Configure connection to EMQX broker
+  </Card>
+  <Card title="Authentication" icon="lock" href="./authentication">
+    Manage MQTT credentials and ACLs
+  </Card>
+</CardGroup>

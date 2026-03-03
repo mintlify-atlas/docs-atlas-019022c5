@@ -1,122 +1,136 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Invernaderos API",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#22c55e",
+    "light": "#86efac",
+    "dark": "#15803d"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/apptolast/InvernaderosAPI"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/apptolast/InvernaderosAPI"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/multi-tenant",
+              "concepts/mqtt-integration",
+              "concepts/time-series-data",
+              "concepts/websocket-realtime"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Deployment",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "deployment/docker-compose",
+              "deployment/kubernetes",
+              "deployment/configuration"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Data Management",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "data/databases",
+              "data/caching-strategy",
+              "data/migrations"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Authentication",
             "pages": [
-              "api-reference/introduction"
+              "api/auth/login",
+              "api/auth/register",
+              "api/auth/password-reset"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Tenant Management",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/tenants/overview",
+              "api/tenants/greenhouses",
+              "api/tenants/users",
+              "api/tenants/alerts"
+            ]
+          },
+          {
+            "group": "Sensor Data",
+            "pages": [
+              "api/sensors/readings",
+              "api/sensors/statistics",
+              "api/sensors/devices"
+            ]
+          },
+          {
+            "group": "MQTT",
+            "pages": [
+              "api/mqtt/publishing",
+              "api/mqtt/topics",
+              "api/mqtt/rate-limiting"
+            ]
+          },
+          {
+            "group": "Catalogs",
+            "pages": [
+              "api/catalogs/data-types",
+              "api/catalogs/devices",
+              "api/catalogs/alerts"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integration",
+        "groups": [
+          {
+            "group": "MQTT Protocols",
+            "pages": [
+              "integration/mqtt/setup",
+              "integration/mqtt/message-format",
+              "integration/mqtt/authentication"
+            ]
+          },
+          {
+            "group": "WebSocket",
+            "pages": [
+              "integration/websocket/stomp",
+              "integration/websocket/topics"
+            ]
+          },
+          {
+            "group": "SDKs",
+            "pages": [
+              "integration/sdks/kotlin-multiplatform",
+              "integration/sdks/mobile-apps"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

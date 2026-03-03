@@ -1,0 +1,407 @@
+---
+title: 'MQTT Publishing'
+description: 'Publish messages to the MQTT broker'
+---
+
+## Overview
+
+The MQTT publishing endpoints allow you to manually send messages to the MQTT broker for testing and verification purposes. These endpoints are useful for:
+
+- Verifying data reception
+- Testing MQTT connectivity
+- Debugging sensor integration issues
+- Contrasting information with other systems (e.g., Node-RED, EMQX dashboard)
+
+## Publish Latest Message
+
+<CodeGroup>
+```bash cURL
+curl -X POST "http://api.example.com/api/v1/mqtt/publish" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "SYSTEM/RESPONSE",
+    "qos": 0
+  }'
+```
+
+```javascript JavaScript
+fetch('http://api.example.com/api/v1/mqtt/publish', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    topic: 'SYSTEM/RESPONSE',
+    qos: 0
+  })
+})
+.then(response => response.json())
+.then(data => console.log(data));
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://api.example.com/api/v1/mqtt/publish',
+    json={
+        'topic': 'SYSTEM/RESPONSE',
+        'qos': 0
+    }
+)
+print(response.json())
+```
+</CodeGroup>
+
+### Endpoint
+
+```
+POST /api/v1/mqtt/publish
+```
+
+### Query Parameters
+
+<ParamField query="topic" type="string" optional>
+  MQTT topic destination (defaults to `SYSTEM/RESPONSE`)
+</ParamField>
+
+<ParamField query="qos" type="integer" optional>
+  Quality of Service level: 0, 1, or 2 (defaults to 0)
+</ParamField>
+
+### Response
+
+<ResponseField name="success" type="boolean" required>
+  Whether the message was published successfully
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Success or error message
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="string">
+  ID of the greenhouse from the cached message
+</ResponseField>
+
+<ResponseField name="topic" type="string">
+  MQTT topic where the message was published
+</ResponseField>
+
+<ResponseField name="qos" type="integer">
+  Quality of Service level used
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  The RealDataDto object that was published
+</ResponseField>
+
+### Response Example
+
+```json
+{
+  "success": true,
+  "message": "Mensaje publicado correctamente al broker MQTT",
+  "greenhouseId": "550e8400-e29b-41d4-a716-446655440000",
+  "topic": "SYSTEM/RESPONSE",
+  "qos": 0,
+  "data": {
+    "timestamp": "2025-11-16T10:30:00Z",
+    "TEMPERATURA INVERNADERO 01": 25.5,
+    "HUMEDAD INVERNADERO 01": 60.2,
+    "greenhouseId": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+<Note>
+This endpoint publishes the latest message received from the Redis cache. If no messages are available in the cache, it returns a 400 error.
+</Note>
+
+## Publish Custom Message
+
+<CodeGroup>
+```bash cURL
+curl -X POST "http://api.example.com/api/v1/mqtt/publish/custom?topic=SYSTEM/RESPONSE&qos=0" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "timestamp": "2025-11-16T10:30:00Z",
+    "TEMPERATURA INVERNADERO 01": 25.5,
+    "HUMEDAD INVERNADERO 01": 60.2,
+    "INVERNADERO_01_SECTOR_01": 1.0,
+    "INVERNADERO_01_EXTRACTOR": 0.0,
+    "greenhouseId": "550e8400-e29b-41d4-a716-446655440000"
+  }'
+```
+
+```javascript JavaScript
+fetch('http://api.example.com/api/v1/mqtt/publish/custom?topic=SYSTEM/RESPONSE&qos=0', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    timestamp: '2025-11-16T10:30:00Z',
+    'TEMPERATURA INVERNADERO 01': 25.5,
+    'HUMEDAD INVERNADERO 01': 60.2,
+    'INVERNADERO_01_SECTOR_01': 1.0,
+    'INVERNADERO_01_EXTRACTOR': 0.0,
+    greenhouseId: '550e8400-e29b-41d4-a716-446655440000'
+  })
+})
+.then(response => response.json())
+.then(data => console.log(data));
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://api.example.com/api/v1/mqtt/publish/custom',
+    params={
+        'topic': 'SYSTEM/RESPONSE',
+        'qos': 0
+    },
+    json={
+        'timestamp': '2025-11-16T10:30:00Z',
+        'TEMPERATURA INVERNADERO 01': 25.5,
+        'HUMEDAD INVERNADERO 01': 60.2,
+        'INVERNADERO_01_SECTOR_01': 1.0,
+        'INVERNADERO_01_EXTRACTOR': 0.0,
+        'greenhouseId': '550e8400-e29b-41d4-a716-446655440000'
+    }
+)
+print(response.json())
+```
+</CodeGroup>
+
+### Endpoint
+
+```
+POST /api/v1/mqtt/publish/custom
+```
+
+### Query Parameters
+
+<ParamField query="topic" type="string" optional>
+  MQTT topic destination (defaults to `SYSTEM/RESPONSE`)
+</ParamField>
+
+<ParamField query="qos" type="integer" optional>
+  Quality of Service level: 0, 1, or 2 (defaults to 0)
+</ParamField>
+
+### Request Body
+
+The request body should contain a `RealDataDto` object with the following structure:
+
+<ParamField body="timestamp" type="string" required>
+  ISO 8601 timestamp
+</ParamField>
+
+<ParamField body="TEMPERATURA INVERNADERO 01" type="number" optional>
+  Temperature of Greenhouse 01 in °C
+</ParamField>
+
+<ParamField body="HUMEDAD INVERNADERO 01" type="number" optional>
+  Humidity of Greenhouse 01 in %
+</ParamField>
+
+<ParamField body="INVERNADERO_01_SECTOR_01" type="number" optional>
+  Sector 01 status (0.0 or 1.0)
+</ParamField>
+
+<ParamField body="INVERNADERO_01_EXTRACTOR" type="number" optional>
+  Extractor status (0.0 or 1.0)
+</ParamField>
+
+<ParamField body="greenhouseId" type="string" optional>
+  UUID of the greenhouse
+</ParamField>
+
+<ParamField body="tenantId" type="string" optional>
+  Tenant identifier for multi-tenancy
+</ParamField>
+
+<Note>
+The RealDataDto supports 22 fields for temperature, humidity, sectors, and extractors across 3 greenhouses. See the [Message Payload Structure](#message-payload-structure) section for the complete list.
+</Note>
+
+### Response Example
+
+```json
+{
+  "success": true,
+  "message": "Mensaje personalizado publicado correctamente",
+  "topic": "SYSTEM/RESPONSE",
+  "qos": 0,
+  "data": {
+    "timestamp": "2025-11-16T10:30:00Z",
+    "TEMPERATURA INVERNADERO 01": 25.5,
+    "HUMEDAD INVERNADERO 01": 60.2,
+    "greenhouseId": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+## Publish Raw JSON
+
+<CodeGroup>
+```bash cURL
+curl -X POST "http://api.example.com/api/v1/mqtt/publish/raw?topic=SYSTEM/RESPONSE&qos=0" \
+  -H "Content-Type: application/json" \
+  -d '{"TEMPERATURA INVERNADERO 01":25.5,"HUMEDAD INVERNADERO 01":60.2}'
+```
+
+```javascript JavaScript
+fetch('http://api.example.com/api/v1/mqtt/publish/raw?topic=SYSTEM/RESPONSE&qos=0', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: '{"TEMPERATURA INVERNADERO 01":25.5,"HUMEDAD INVERNADERO 01":60.2}'
+})
+.then(response => response.json())
+.then(data => console.log(data));
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    'http://api.example.com/api/v1/mqtt/publish/raw',
+    params={
+        'topic': 'SYSTEM/RESPONSE',
+        'qos': 0
+    },
+    data='{"TEMPERATURA INVERNADERO 01":25.5,"HUMEDAD INVERNADERO 01":60.2}'
+)
+print(response.json())
+```
+</CodeGroup>
+
+### Endpoint
+
+```
+POST /api/v1/mqtt/publish/raw
+```
+
+### Query Parameters
+
+<ParamField query="topic" type="string" optional>
+  MQTT topic destination (defaults to `SYSTEM/RESPONSE`)
+</ParamField>
+
+<ParamField query="qos" type="integer" optional>
+  Quality of Service level: 0, 1, or 2 (defaults to 0)
+</ParamField>
+
+### Request Body
+
+Raw JSON string (no validation performed)
+
+### Response Example
+
+```json
+{
+  "success": true,
+  "message": "JSON raw publicado correctamente",
+  "topic": "SYSTEM/RESPONSE",
+  "qos": 0
+}
+```
+
+<Warning>
+This endpoint publishes raw JSON without validation. Use with caution in production environments.
+</Warning>
+
+## Message Payload Structure
+
+The `RealDataDto` object supports the following fields:
+
+### Temperature and Humidity (3 Greenhouses)
+
+- `TEMPERATURA INVERNADERO 01` - Temperature in °C (Greenhouse 01)
+- `HUMEDAD INVERNADERO 01` - Humidity in % (Greenhouse 01)
+- `TEMPERATURA INVERNADERO 02` - Temperature in °C (Greenhouse 02)
+- `HUMEDAD INVERNADERO 02` - Humidity in % (Greenhouse 02)
+- `TEMPERATURA INVERNADERO 03` - Temperature in °C (Greenhouse 03)
+- `HUMEDAD INVERNADERO 03` - Humidity in % (Greenhouse 03)
+
+### Sectors (12 Fields)
+
+- `INVERNADERO_01_SECTOR_01` to `INVERNADERO_01_SECTOR_04` (Greenhouse 01)
+- `INVERNADERO_02_SECTOR_01` to `INVERNADERO_02_SECTOR_04` (Greenhouse 02)
+- `INVERNADERO_03_SECTOR_01` to `INVERNADERO_03_SECTOR_04` (Greenhouse 03)
+
+### Extractors (3 Fields)
+
+- `INVERNADERO_01_EXTRACTOR` (Greenhouse 01)
+- `INVERNADERO_02_EXTRACTOR` (Greenhouse 02)
+- `INVERNADERO_03_EXTRACTOR` (Greenhouse 03)
+
+### Additional Fields
+
+- `RESERVA` - Reserve value
+- `greenhouseId` - UUID of the greenhouse
+- `tenantId` - Tenant identifier for multi-tenancy
+- `timestamp` - ISO 8601 timestamp
+
+<Note>
+Note the key format difference:
+- Temperature/Humidity fields use **SPACES**: `"TEMPERATURA INVERNADERO 01"`
+- Sector/Extractor fields use **UNDERSCORES**: `"INVERNADERO_01_SECTOR_01"`
+
+This matches the actual greenhouse hardware output format and must not be changed.
+</Note>
+
+## QoS Levels
+
+MQTT supports three Quality of Service levels:
+
+<ParamField query="0" type="QoS 0">
+  **At most once** - Fire and forget. The message is delivered at most once, or it may not be delivered at all. Use for sensor data where occasional loss is acceptable.
+</ParamField>
+
+<ParamField query="1" type="QoS 1">
+  **At least once** - The message is delivered at least once, but may be delivered multiple times. Use for actuator commands that must be received.
+</ParamField>
+
+<ParamField query="2" type="QoS 2">
+  **Exactly once** - The message is delivered exactly once. Use for critical alerts that must not be duplicated.
+</ParamField>
+
+## Response Topic
+
+By default, all published messages are sent to the `SYSTEM/RESPONSE` topic. This topic is used for:
+
+- **Verification**: Hardware engineers can subscribe to verify that the API received data correctly
+- **Bidirectional Communication**: Allows external systems to confirm message reception
+- **Testing**: Useful for debugging MQTT integration issues
+
+<Note>
+The response topic can be customized using the `topic` query parameter or by setting the `spring.mqtt.topics.response` property in `application.yaml`.
+</Note>
+
+## Error Responses
+
+### No Messages Available
+
+```json
+{
+  "success": false,
+  "error": "No hay mensajes disponibles en la caché"
+}
+```
+
+HTTP Status: `400 Bad Request`
+
+### Publication Failed
+
+```json
+{
+  "success": false,
+  "error": "Error al publicar mensaje al broker MQTT"
+}
+```
+
+HTTP Status: `500 Internal Server Error`

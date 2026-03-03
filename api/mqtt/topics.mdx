@@ -1,0 +1,373 @@
+---
+title: 'MQTT Topic Structure'
+description: 'Understanding the MQTT topic hierarchy and routing'
+---
+
+## Overview
+
+The Invernaderos API uses a hierarchical MQTT topic structure for organizing sensor data, actuator commands, and system events. Topics support multi-tenant isolation and follow MQTT best practices for scalability.
+
+## Topic Hierarchy
+
+The system uses the following topic pattern:
+
+```
+GREENHOUSE/{tenantId}/{resource}/{action}
+```
+
+### Root Topics
+
+<ParamField path="GREENHOUSE" type="topic">
+  **Legacy Format** - Maps to `DEFAULT` tenant for backward compatibility
+  
+  ```
+  GREENHOUSE
+  ```
+</ParamField>
+
+<ParamField path="GREENHOUSE/{tenantId}" type="topic">
+  **Multi-Tenant Format** - Isolates data by tenant
+  
+  ```
+  GREENHOUSE/SARA
+  GREENHOUSE/001
+  GREENHOUSE/NARANJOS
+  ```
+</ParamField>
+
+<ParamField path="SYSTEM/RESPONSE" type="topic">
+  **Response Topic** - Echo/verification messages
+  
+  ```
+  SYSTEM/RESPONSE
+  ```
+</ParamField>
+
+## Tenant-Based Topics
+
+The API supports multi-tenant isolation through topic-based routing. Each tenant's data is segregated using a unique tenant identifier in the topic path.
+
+### Topic Extraction
+
+The system extracts the tenant ID from the topic using the following logic:
+
+<CodeGroup>
+```kotlin Kotlin
+val tenantId = when {
+    topic.startsWith("GREENHOUSE/") -> 
+        topic.substringAfter("GREENHOUSE/")
+             .takeWhile { it != '/' }
+    topic == "GREENHOUSE" -> "DEFAULT"
+    else -> "UNKNOWN"
+}
+```
+
+```javascript JavaScript
+function extractTenantId(topic) {
+  if (topic.startsWith('GREENHOUSE/')) {
+    return topic.substring('GREENHOUSE/'.length).split('/')[0];
+  } else if (topic === 'GREENHOUSE') {
+    return 'DEFAULT';
+  } else {
+    return 'UNKNOWN';
+  }
+}
+```
+
+```python Python
+def extract_tenant_id(topic: str) -> str:
+    if topic.startswith('GREENHOUSE/'):
+        return topic[len('GREENHOUSE/'):].split('/')[0]
+    elif topic == 'GREENHOUSE':
+        return 'DEFAULT'
+    else:
+        return 'UNKNOWN'
+```
+</CodeGroup>
+
+### Examples
+
+| Topic | Extracted Tenant ID | Description |
+|-------|---------------------|-------------|
+| `GREENHOUSE` | `DEFAULT` | Legacy format for backward compatibility |
+| `GREENHOUSE/SARA` | `SARA` | Vivero Sara greenhouse system |
+| `GREENHOUSE/001` | `001` | Generic tenant ID |
+| `GREENHOUSE/NARANJOS` | `NARANJOS` | Los Naranjos farm |
+
+<Note>
+The `DEFAULT` tenant is automatically created during database migration (V7) to support existing systems using the legacy `GREENHOUSE` topic.
+</Note>
+
+## Sensor Topics
+
+Sensor data is published to tenant-specific topics following this pattern:
+
+```
+GREENHOUSE/{tenantId}
+```
+
+### Message Format
+
+<CodeGroup>
+```json Example Message
+{
+  "TEMPERATURA INVERNADERO 01": 25.5,
+  "HUMEDAD INVERNADERO 01": 60.2,
+  "TEMPERATURA INVERNADERO 02": 26.3,
+  "HUMEDAD INVERNADERO 02": 58.7,
+  "INVERNADERO_01_SECTOR_01": 1.0,
+  "INVERNADERO_01_SECTOR_02": 0.0,
+  "INVERNADERO_01_EXTRACTOR": 1.0,
+  "timestamp": "2025-11-16T10:30:00Z"
+}
+```
+
+```bash Publish Example
+mosquitto_pub -t "GREENHOUSE/SARA" \
+  -m '{"TEMPERATURA INVERNADERO 01":25.5,"HUMEDAD INVERNADERO 01":60.2}'
+```
+</CodeGroup>
+
+### Subscription Pattern
+
+To subscribe to all greenhouse data across tenants, use the wildcard pattern:
+
+```bash
+mosquitto_sub -t "GREENHOUSE/+"
+```
+
+To subscribe to a specific tenant:
+
+```bash
+mosquitto_sub -t "GREENHOUSE/SARA"
+```
+
+## Actuator Topics
+
+Actuator commands follow a more specific topic hierarchy:
+
+```
+greenhouse/{greenhouseId}/actuators/{actuatorId}/command
+```
+
+### Command Format
+
+<CodeGroup>
+```json Turn On Extractor
+{
+  "command": "turn_on",
+  "value": 1,
+  "timestamp": "2025-11-16T10:30:00Z"
+}
+```
+
+```json Set Temperature Setpoint
+{
+  "command": "set_temperature",
+  "value": 25.0,
+  "timestamp": "2025-11-16T10:30:00Z"
+}
+```
+
+```bash Publish Command
+mosquitto_pub -t "greenhouse/550e8400-e29b-41d4-a716-446655440000/actuators/extractor_01/command" \
+  -m '{"command":"turn_on","value":1}' \
+  -q 1
+```
+</CodeGroup>
+
+<Note>
+Actuator commands should use **QoS 1** (at least once) to ensure reliable delivery.
+</Note>
+
+## Alert Topics
+
+System alerts are published to tenant-specific alert topics:
+
+```
+greenhouse/{greenhouseId}/alerts/{alertType}
+```
+
+### Alert Types
+
+<ParamField path="THRESHOLD_EXCEEDED" type="alert">
+  Sensor reading exceeded configured threshold
+</ParamField>
+
+<ParamField path="SENSOR_OFFLINE" type="alert">
+  Sensor has not reported within expected interval
+</ParamField>
+
+<ParamField path="ACTUATOR_FAILURE" type="alert">
+  Actuator failed to respond to command
+</ParamField>
+
+<ParamField path="SYSTEM_ERROR" type="alert">
+  System-level error requiring attention
+</ParamField>
+
+### Alert Format
+
+<CodeGroup>
+```json Temperature Alert
+{
+  "message": "Temperature exceeded threshold: 35.2°C > 30.0°C",
+  "severity": "WARNING",
+  "timestamp": "2025-11-16T10:30:00Z"
+}
+```
+
+```json Sensor Offline Alert
+{
+  "message": "Sensor TEMP_01 has not reported in 5 minutes",
+  "severity": "ERROR",
+  "timestamp": "2025-11-16T10:30:00Z"
+}
+```
+
+```bash Publish Alert
+mosquitto_pub -t "greenhouse/550e8400-e29b-41d4-a716-446655440000/alerts/THRESHOLD_EXCEEDED" \
+  -m '{"message":"Temperature exceeded threshold","severity":"WARNING"}' \
+  -q 2
+```
+</CodeGroup>
+
+<Warning>
+Alerts should use **QoS 2** (exactly once) to prevent duplicate alert notifications.
+</Warning>
+
+## System Event Topics
+
+System-wide events are published to the following topics:
+
+```
+system/events/#
+```
+
+### Event Types
+
+- `system/events/startup` - API started
+- `system/events/shutdown` - API shutting down
+- `system/events/connection` - MQTT connection status changes
+- `system/events/error` - System-level errors
+
+## Topic-Based Routing
+
+The system uses Spring Integration's message routing to direct MQTT messages to appropriate handlers:
+
+```kotlin
+@ServiceActivator(inputChannel = "mqttInputChannel")
+fun mqttMessageHandler(): MessageHandler {
+    return MessageHandler { message ->
+        val topic = message.headers[MqttHeaders.RECEIVED_TOPIC] as? String
+        when {
+            topic?.startsWith("GREENHOUSE") == true -> 
+                greenhouseDataListener.handleGreenhouseData(message)
+            topic?.contains("/sensors/") == true -> 
+                sensorDataListener.handleSensorData(message)
+            topic?.contains("/actuators/") == true -> 
+                actuatorStatusListener.handleActuatorStatus(message)
+            else -> 
+                logger.warn("Unknown topic: $topic")
+        }
+    }
+}
+```
+
+### Routing Table
+
+| Topic Pattern | Handler | QoS | Description |
+|---------------|---------|-----|-------------|
+| `GREENHOUSE` | GreenhouseDataListener | 0 | Legacy greenhouse data |
+| `GREENHOUSE/+` | GreenhouseDataListener | 0 | Multi-tenant greenhouse data |
+| `greenhouse/+/sensors/#` | SensorDataListener | 0 | Individual sensor readings |
+| `greenhouse/+/actuators/#` | ActuatorStatusListener | 1 | Actuator status updates |
+| `system/events/#` | SystemEventListener | 0 | System events |
+
+## Wildcard Subscriptions
+
+MQTT supports two types of wildcards:
+
+### Single-Level Wildcard (+)
+
+Matches exactly one topic level:
+
+```bash
+# Matches: GREENHOUSE/SARA, GREENHOUSE/001, GREENHOUSE/NARANJOS
+# Does NOT match: GREENHOUSE, GREENHOUSE/SARA/sensors
+mosquitto_sub -t "GREENHOUSE/+"
+```
+
+### Multi-Level Wildcard (#)
+
+Matches zero or more topic levels (must be at the end):
+
+```bash
+# Matches: system/events/startup, system/events/error, system/events/connection/lost
+mosquitto_sub -t "system/events/#"
+```
+
+<Warning>
+Avoid subscribing to `#` (all topics) in production as it will receive every message published to the broker.
+</Warning>
+
+## Response Topic (Echo)
+
+The API automatically echoes received messages to the `SYSTEM/RESPONSE` topic for verification:
+
+```
+GREENHOUSE/SARA  →  API Processes  →  SYSTEM/RESPONSE
+```
+
+This allows hardware engineers to:
+
+1. Publish sensor data to `GREENHOUSE/{tenantId}`
+2. Subscribe to `SYSTEM/RESPONSE`
+3. Verify the API received and processed the data correctly
+
+<CodeGroup>
+```bash Publisher (Hardware)
+# Publish sensor data
+mosquitto_pub -t "GREENHOUSE/SARA" \
+  -m '{"TEMPERATURA INVERNADERO 01":25.5}'
+```
+
+```bash Subscriber (Verification)
+# Subscribe to echo responses
+mosquitto_sub -t "SYSTEM/RESPONSE" -v
+
+# Output:
+# SYSTEM/RESPONSE {"timestamp":"2025-11-16T10:30:00Z","TEMPERATURA INVERNADERO 01":25.5,"greenhouseId":"SARA"}
+```
+</CodeGroup>
+
+## Best Practices
+
+### Topic Naming
+
+- Use descriptive, hierarchical topic names
+- Avoid spaces and special characters
+- Use forward slashes (/) to separate levels
+- Keep topic depth reasonable (3-5 levels max)
+
+### QoS Selection
+
+- **QoS 0**: Sensor data (frequent, loss acceptable)
+- **QoS 1**: Actuator commands (must be received)
+- **QoS 2**: Critical alerts (no duplicates)
+
+### Multi-Tenancy
+
+- Always include tenant ID in topics for isolation
+- Use the `DEFAULT` tenant for legacy compatibility
+- Validate tenant IDs in message handlers
+
+### Security
+
+- Implement ACL rules to restrict topic access per tenant
+- Use authentication for all MQTT clients
+- Avoid publishing sensitive data in topic names
+
+<Note>
+The MQTT broker (EMQX) supports Access Control Lists (ACLs) to restrict which clients can publish/subscribe to specific topics. Configure ACLs to enforce tenant isolation.
+</Note>

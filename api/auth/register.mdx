@@ -1,0 +1,290 @@
+---
+title: 'Register'
+api: 'POST /api/v1/auth/register'
+description: 'Register a new company (tenant) and create an admin user account'
+---
+
+## Overview
+
+Register a new company in the Invernaderos system. This endpoint creates both a **tenant** (company entity) and an **admin user** in a single atomic transaction. The admin user receives full access to manage greenhouses, sensors, and users within their tenant.
+
+## Request Body
+
+<ParamField body="company_name" type="string" required>
+  Name of the company/tenant
+  
+  **Validation**: 
+  - Must not be blank
+  - Length: 2-100 characters
+  
+  **Example**: `"Greenhouse Tech"`
+</ParamField>
+
+<ParamField body="tax_id" type="string" required>
+  Tax identification number (NIF/CIF in Spain, VAT number in EU)
+  
+  **Validation**: Must not be blank
+  
+  **Example**: `"B12345678"`
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Admin user's email address (also used as username for login)
+  
+  **Validation**:
+  - Must not be blank
+  - Must be valid email format
+  - Must be unique (not already registered)
+  
+  **Example**: `"admin@greenhousetech.com"`
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Admin user's password
+  
+  **Validation**:
+  - Must not be blank
+  - Minimum length: 6 characters
+  
+  **Example**: `"securePass123"`
+</ParamField>
+
+<ParamField body="first_name" type="string" required>
+  Contact person's first name
+  
+  **Validation**: Must not be blank
+  
+  **Example**: `"John"`
+</ParamField>
+
+<ParamField body="last_name" type="string" required>
+  Contact person's last name
+  
+  **Validation**: Must not be blank
+  
+  **Example**: `"Doe"`
+</ParamField>
+
+<ParamField body="phone" type="string" optional>
+  Contact phone number
+  
+  **Example**: `"+34600123456"`
+</ParamField>
+
+<ParamField body="address" type="string" optional>
+  Physical address of the company
+  
+  **Example**: `"Calle Principal 123, Madrid"`
+</ParamField>
+
+## Response
+
+Upon successful registration, the user is **automatically logged in** and receives a JWT token.
+
+<ResponseField name="token" type="string" required>
+  JWT access token for the newly created admin user
+</ResponseField>
+
+<ResponseField name="type" type="string" required>
+  Token type, always returns `"Bearer"`
+</ResponseField>
+
+<ResponseField name="username" type="string" required>
+  Email address of the newly created admin user
+</ResponseField>
+
+<ResponseField name="roles" type="string[]" required>
+  Roles assigned to the user. For new registrations, always includes `["ROLE_ADMIN"]`
+</ResponseField>
+
+## Registration Flow
+
+<Steps>
+  <Step title="Validate Input">
+    The API validates all required fields and checks email uniqueness
+  </Step>
+  
+  <Step title="Create Tenant">
+    A new tenant (company) is created with:
+    - Auto-generated unique tenant code
+    - Company name from request
+    - Contact information (email, phone, address)
+    - Active status set to `true`
+  </Step>
+  
+  <Step title="Create Admin User">
+    An admin user is created and associated with the new tenant:
+    - Auto-generated unique user code
+    - Email as username
+    - Password is securely hashed using BCrypt
+    - Role set to `"ADMIN"`
+    - Active status set to `true`
+  </Step>
+  
+  <Step title="Auto-Login">
+    The user is automatically logged in:
+    - JWT token is generated with `tenantId` and `role` claims
+    - Token and user details are returned in response
+  </Step>
+</Steps>
+
+## Example Request
+
+```bash
+curl -X POST https://api.invernaderos.com/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "company_name": "Greenhouse Tech",
+    "tax_id": "B12345678",
+    "email": "admin@greenhousetech.com",
+    "password": "securePass123",
+    "first_name": "John",
+    "last_name": "Doe",
+    "phone": "+34600123456",
+    "address": "Calle Principal 123, Madrid"
+  }'
+```
+
+## Example Response
+
+<CodeGroup>
+```json 200 - Success
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBncmVlbmhvdXNldGVjaC5jb20iLCJ0ZW5hbnRJZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDg2NDAwfQ.signature",
+  "type": "Bearer",
+  "username": "admin@greenhousetech.com",
+  "roles": ["ROLE_ADMIN"]
+}
+```
+
+```json 400 - Email Already Exists
+{
+  "timestamp": "2025-11-16T10:30:00.000Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Email already in use",
+  "path": "/api/v1/auth/register"
+}
+```
+
+```json 400 - Validation Error
+{
+  "timestamp": "2025-11-16T10:30:00.000Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "password",
+      "message": "Password must be at least 6 characters long"
+    },
+    {
+      "field": "email",
+      "message": "Invalid email format"
+    }
+  ],
+  "path": "/api/v1/auth/register"
+}
+```
+</CodeGroup>
+
+## Status Codes
+
+<ResponseField name="200" type="OK">
+  Successfully registered. Tenant and admin user created. JWT token returned.
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Registration failed due to validation errors or duplicate email.
+  
+  **Common causes**:
+  - Email already registered
+  - Password too short (< 6 characters)
+  - Company name too short (< 2 characters) or too long (> 100 characters)
+  - Invalid email format
+  - Missing required fields
+</ResponseField>
+
+## Multi-Tenant Isolation
+
+<Info>
+  Each registered company becomes an isolated **tenant** in the system. All data (greenhouses, sensors, users) is automatically scoped to the tenant based on the JWT token's `tenantId` claim.
+  
+  **Tenant Isolation Ensures**:
+  - Company A cannot see Company B's greenhouses or sensor data
+  - Each tenant has independent user management
+  - Cross-tenant API access is prevented at the database level
+</Info>
+
+## Admin User Privileges
+
+The newly created admin user has full access to:
+
+<Expandable title="Admin Capabilities">
+  - **Greenhouse Management**: Create, update, delete greenhouses
+  - **Sensor Management**: Configure sensors, view real-time data, set thresholds
+  - **Actuator Control**: Manage irrigation, ventilation, climate controls
+  - **User Management**: Invite additional users, assign roles (ADMIN, USER, VIEWER)
+  - **Alert Configuration**: Set up custom alerts and notifications
+  - **Tenant Settings**: Update company information, billing, integrations
+</Expandable>
+
+## Validation Rules
+
+<Warning title="Field Validation">
+  The following validation rules are enforced:
+  
+  | Field | Rule | Error Message |
+  |-------|------|---------------|
+  | company_name | 2-100 characters | "Company Name must be between 2 and 100 characters" |
+  | tax_id | Not blank | "Tax ID is required" |
+  | email | Valid email format | "Invalid email format" |
+  | email | Unique | "Email already in use" |
+  | password | Min 6 characters | "Password must be at least 6 characters long" |
+  | first_name | Not blank | "First Name is required" |
+  | last_name | Not blank | "Last Name is required" |
+</Warning>
+
+## Database Schema
+
+<Expandable title="Tenant Table Structure">
+  ```sql
+  CREATE TABLE metadata.tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(50) UNIQUE NOT NULL,  -- Auto-generated (e.g., "TNT-001")
+    name VARCHAR(200) NOT NULL,        -- company_name from request
+    email VARCHAR(100),                -- Contact email
+    phone VARCHAR(50),                 -- Contact phone
+    province VARCHAR(100),             -- address mapped to province
+    country VARCHAR(100),              -- Default: "España"
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+  ```
+</Expandable>
+
+<Expandable title="User Table Structure">
+  ```sql
+  CREATE TABLE metadata.users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code VARCHAR(50) UNIQUE NOT NULL,  -- Auto-generated (e.g., "USR-001")
+    tenant_id UUID NOT NULL REFERENCES metadata.tenants(id),
+    username VARCHAR(100) NOT NULL,    -- email from request
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,  -- BCrypt hashed password
+    role VARCHAR(50) NOT NULL,         -- "ADMIN" for new registrations
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+  );
+  ```
+</Expandable>
+
+## Source Code References
+
+- **Controller**: `AuthController.kt:27-36` - Register endpoint definition
+- **Service**: `AuthService.kt:42-68` - Registration logic
+- **DTO**: `AuthDTOs.kt:19-54` - RegisterRequest structure
+- **User Service**: `UserService.kt:121-158` - Tenant and user creation
+- **Response**: `AuthDTOs.kt:56-62` - JwtResponse structure

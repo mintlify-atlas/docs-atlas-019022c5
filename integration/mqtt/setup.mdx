@@ -1,0 +1,507 @@
+---
+title: 'MQTT Client Setup'
+description: 'Connect to the Invernaderos MQTT broker using various client libraries'
+icon: 'plug'
+---
+
+## Overview
+
+The Invernaderos API uses **EMQX** as the MQTT broker for real-time IoT communication. This guide shows you how to connect clients using popular MQTT libraries.
+
+<Info>
+The broker supports MQTT v3.1.1 and v5.0 protocols with WebSocket (WSS) for browser clients.
+</Info>
+
+## Connection Parameters
+
+Extract these values from the API configuration:
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| **Broker URL** | `wss://your-broker:8084/mqtt` | `MqttConfig.kt:34` |
+| **Port (MQTT)** | 1883 | Standard MQTT |
+| **Port (WebSocket)** | 8083 | EMQX Dashboard |
+| **Port (Secure WSS)** | 8084 | Production |
+| **Username** | From credentials | `MqttConfig.kt:37` |
+| **Password** | From credentials | `MqttConfig.kt:40` |
+| **Client ID Prefix** | `greenhouse-api` | `MqttConfig.kt:43` |
+| **Clean Session** | `false` | Persists session |
+| **Keep Alive** | 60 seconds | `MqttConfig.kt:52` |
+| **Auto Reconnect** | `true` | `MqttConfig.kt:55` |
+| **QoS** | 0 (default) | `MqttConfig.kt:70` |
+
+<Warning>
+In production, **always use WSS** (secure WebSocket) for MQTT connections. Never expose plain MQTT on public networks.
+</Warning>
+
+## Setup by Library
+
+<Steps>
+
+### Step 1: Choose Your Client Library
+
+Select the appropriate library for your platform:
+
+<Tabs>
+  <Tab title="Eclipse Paho (Java/Kotlin)">
+    The official MQTT client used by the Invernaderos API.
+
+    ```kotlin build.gradle.kts
+    dependencies {
+        implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+        implementation("org.springframework.integration:spring-integration-mqtt:6.5.3")
+    }
+    ```
+
+    **Configuration Example:**
+
+    ```kotlin MqttClientSetup.kt
+    import org.eclipse.paho.client.mqttv3.MqttClient
+    import org.eclipse.paho.client.mqttv3.MqttConnectOptions
+    import org.eclipse.paho.client.mqttv3.MqttMessage
+    import java.util.UUID
+
+    class GreenhouseMqttClient {
+        private val brokerUrl = "wss://your-broker:8084/mqtt"
+        private val clientId = "greenhouse-client-${UUID.randomUUID()}"
+        private lateinit var client: MqttClient
+
+        fun connect(username: String, password: String) {
+            client = MqttClient(brokerUrl, clientId)
+
+            val options = MqttConnectOptions().apply {
+                userName = username
+                setPassword(password.toCharArray())
+                isCleanSession = false
+                connectionTimeout = 10
+                keepAliveInterval = 60
+                isAutomaticReconnect = true
+            }
+
+            client.connect(options)
+            println("Connected to MQTT broker: $brokerUrl")
+        }
+
+        fun subscribe(topic: String) {
+            client.subscribe(topic) { topic, message ->
+                println("Message received on $topic: ${String(message.payload)}")
+            }
+        }
+
+        fun publish(topic: String, payload: String) {
+            val message = MqttMessage(payload.toByteArray()).apply {
+                qos = 0
+                isRetained = false
+            }
+            client.publish(topic, message)
+        }
+
+        fun disconnect() {
+            client.disconnect()
+        }
+    }
+    ```
+
+    **Usage:**
+
+    ```kotlin
+    val client = GreenhouseMqttClient()
+    client.connect("your-username", "your-password")
+    client.subscribe("GREENHOUSE/SARA")
+    client.publish("GREENHOUSE/SARA", jsonPayload)
+    ```
+  </Tab>
+
+  <Tab title="MQTT.js (JavaScript/Node.js)">
+    Popular JavaScript MQTT client for web and Node.js.
+
+    ```bash
+    npm install mqtt
+    ```
+
+    **Configuration Example:**
+
+    ```javascript mqttClient.js
+    const mqtt = require('mqtt');
+
+    const options = {
+      clientId: `greenhouse-client-${Math.random().toString(16).slice(3)}`,
+      username: 'your-username',
+      password: 'your-password',
+      clean: false,
+      keepalive: 60,
+      reconnectPeriod: 1000,
+      connectTimeout: 10 * 1000,
+      queueQoSZero: true
+    };
+
+    const client = mqtt.connect('wss://your-broker:8084/mqtt', options);
+
+    client.on('connect', () => {
+      console.log('Connected to MQTT broker');
+      
+      // Subscribe to topics
+      client.subscribe('GREENHOUSE/SARA', (err) => {
+        if (!err) {
+          console.log('Subscribed to GREENHOUSE/SARA');
+        }
+      });
+    });
+
+    client.on('message', (topic, message) => {
+      console.log(`Message on ${topic}: ${message.toString()}`);
+      const data = JSON.parse(message.toString());
+      // Process sensor data
+    });
+
+    client.on('error', (error) => {
+      console.error('Connection error:', error);
+    });
+
+    client.on('reconnect', () => {
+      console.log('Reconnecting to broker...');
+    });
+
+    // Publish sensor data
+    function publishSensorData(tenantId, data) {
+      const topic = `GREENHOUSE/${tenantId}`;
+      const payload = JSON.stringify(data);
+      
+      client.publish(topic, payload, { qos: 0, retain: false }, (err) => {
+        if (err) {
+          console.error('Publish error:', err);
+        } else {
+          console.log(`Published to ${topic}`);
+        }
+      });
+    }
+    ```
+
+    **Browser Example (with Webpack/Vite):**
+
+    ```javascript
+    import mqtt from 'mqtt/dist/mqtt.min';
+
+    const client = mqtt.connect('wss://your-broker:8084/mqtt', {
+      clientId: `web-client-${Date.now()}`,
+      username: 'your-username',
+      password: 'your-password'
+    });
+
+    client.on('connect', () => {
+      console.log('WebSocket MQTT connected');
+      client.subscribe('GREENHOUSE/+'); // Subscribe to all tenants
+    });
+    ```
+  </Tab>
+
+  <Tab title="Paho Python">
+    Python MQTT client for automation scripts and IoT devices.
+
+    ```bash
+    pip install paho-mqtt
+    ```
+
+    **Configuration Example:**
+
+    ```python mqtt_client.py
+    import paho.mqtt.client as mqtt
+    import json
+    import uuid
+
+    class GreenhouseMqttClient:
+        def __init__(self, broker_host, broker_port, username, password):
+            self.client_id = f"greenhouse-client-{uuid.uuid4()}"
+            self.client = mqtt.Client(client_id=self.client_id, clean_session=False)
+            
+            # Set credentials
+            self.client.username_pw_set(username, password)
+            
+            # Configure callbacks
+            self.client.on_connect = self.on_connect
+            self.client.on_message = self.on_message
+            self.client.on_disconnect = self.on_disconnect
+            
+            # Connection settings
+            self.broker_host = broker_host
+            self.broker_port = broker_port
+
+        def on_connect(self, client, userdata, flags, rc):
+            if rc == 0:
+                print(f"Connected to MQTT broker: {self.broker_host}:{self.broker_port}")
+                # Subscribe to topics
+                client.subscribe("GREENHOUSE/+", qos=0)
+                print("Subscribed to GREENHOUSE/+ (all tenants)")
+            else:
+                print(f"Connection failed with code: {rc}")
+
+        def on_message(self, client, userdata, msg):
+            topic = msg.topic
+            payload = msg.payload.decode('utf-8')
+            print(f"Message on {topic}: {payload}")
+            
+            try:
+                data = json.loads(payload)
+                # Process sensor data
+                self.process_sensor_data(data)
+            except json.JSONDecodeError as e:
+                print(f"Invalid JSON: {e}")
+
+        def on_disconnect(self, client, userdata, rc):
+            if rc != 0:
+                print(f"Unexpected disconnect. Code: {rc}. Reconnecting...")
+
+        def connect(self):
+            try:
+                self.client.connect(self.broker_host, self.broker_port, keepalive=60)
+                self.client.loop_start()  # Start background thread
+            except Exception as e:
+                print(f"Connection error: {e}")
+
+        def publish(self, tenant_id, sensor_data):
+            topic = f"GREENHOUSE/{tenant_id}"
+            payload = json.dumps(sensor_data)
+            result = self.client.publish(topic, payload, qos=0, retain=False)
+            
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                print(f"Published to {topic}")
+            else:
+                print(f"Publish failed: {result.rc}")
+
+        def process_sensor_data(self, data):
+            # Implement your data processing logic
+            temp = data.get('TEMPERATURA INVERNADERO 01')
+            humidity = data.get('HUMEDAD INVERNADERO 01')
+            print(f"Temp: {temp}°C, Humidity: {humidity}%")
+
+        def disconnect(self):
+            self.client.loop_stop()
+            self.client.disconnect()
+
+    # Usage
+    if __name__ == "__main__":
+        client = GreenhouseMqttClient(
+            broker_host="your-broker.com",
+            broker_port=1883,  # Use 8883 for TLS
+            username="your-username",
+            password="your-password"
+        )
+        
+        client.connect()
+        
+        # Publish sensor data
+        sensor_data = {
+            "TEMPERATURA INVERNADERO 01": 25.5,
+            "HUMEDAD INVERNADERO 01": 65.2
+        }
+        client.publish("SARA", sensor_data)
+        
+        # Keep running
+        try:
+            while True:
+                pass
+        except KeyboardInterrupt:
+            client.disconnect()
+    ```
+  </Tab>
+</Tabs>
+
+### Step 2: Configure Connection Options
+
+Match these settings from `MqttConfig.kt`:
+
+<CodeGroup>
+```kotlin Kotlin/Spring
+val options = MqttConnectOptions().apply {
+    serverURIs = arrayOf(brokerUrl)
+    userName = username
+    password = password.toCharArray()
+    isCleanSession = false       // Persist session state
+    connectionTimeout = 10       // 10 seconds
+    keepAliveInterval = 60       // 60 seconds
+    isAutomaticReconnect = true  // Auto-reconnect on disconnect
+}
+```
+
+```javascript JavaScript
+const options = {
+  clean: false,
+  keepalive: 60,
+  reconnectPeriod: 1000,
+  connectTimeout: 10000,
+  username: 'your-username',
+  password: 'your-password'
+};
+```
+
+```python Python
+client.username_pw_set(username, password)
+client.connect(broker_host, broker_port, keepalive=60)
+```
+</CodeGroup>
+
+### Step 3: Subscribe to Topics
+
+The API subscribes to these topic patterns (`MqttConfig.kt:140-146`):
+
+- `GREENHOUSE` - Legacy topic (backward compatibility)
+- `GREENHOUSE/+` - Multi-tenant pattern (e.g., `GREENHOUSE/SARA`)
+- `greenhouse/+/sensors/#` - Sensor-specific data
+- `greenhouse/+/actuators/#` - Actuator status updates
+- `system/events/#` - System-level events
+
+**Example Subscriptions:**
+
+```kotlin
+// Subscribe to specific tenant
+client.subscribe("GREENHOUSE/SARA", 0)
+
+// Subscribe to all tenants (wildcard)
+client.subscribe("GREENHOUSE/+", 0)
+
+// Subscribe to sensor updates
+client.subscribe("greenhouse/+/sensors/#", 0)
+```
+
+### Step 4: Test Connection
+
+Verify your client can connect and receive messages:
+
+<Tabs>
+  <Tab title="mosquitto_pub/sub">
+    ```bash
+    # Subscribe to all greenhouse topics
+    mosquitto_sub -h your-broker -p 1883 \
+      -u your-username -P your-password \
+      -t "GREENHOUSE/#" -v
+
+    # Publish test message
+    mosquitto_pub -h your-broker -p 1883 \
+      -u your-username -P your-password \
+      -t "GREENHOUSE/SARA" \
+      -m '{"TEMPERATURA INVERNADERO 01": 25.5}'
+    ```
+  </Tab>
+
+  <Tab title="MQTT Explorer (GUI)">
+    1. Download [MQTT Explorer](http://mqtt-explorer.com/)
+    2. Create connection:
+       - Host: `your-broker`
+       - Port: `1883` (or `8883` for TLS)
+       - Username: `your-username`
+       - Password: `your-password`
+    3. Subscribe to `GREENHOUSE/#` to see all messages
+    4. Publish test message to `GREENHOUSE/SARA`
+  </Tab>
+</Tabs>
+
+</Steps>
+
+## Advanced Configuration
+
+### TLS/SSL (Production)
+
+For secure connections, configure TLS:
+
+<CodeGroup>
+```kotlin Kotlin
+import javax.net.ssl.SSLContext
+
+val sslContext = SSLContext.getInstance("TLS")
+val options = MqttConnectOptions().apply {
+    socketFactory = sslContext.socketFactory
+    serverURIs = arrayOf("ssl://your-broker:8883")
+}
+```
+
+```javascript JavaScript
+const client = mqtt.connect('wss://your-broker:8084/mqtt', {
+  protocol: 'wss',
+  rejectUnauthorized: true // Verify server certificate
+});
+```
+
+```python Python
+import ssl
+
+ssl_context = ssl.create_default_context()
+client.tls_set_context(ssl_context)
+client.connect("your-broker", 8883, 60)
+```
+</CodeGroup>
+
+### Last Will and Testament (LWT)
+
+Configure a message sent when client disconnects unexpectedly:
+
+```kotlin
+val options = MqttConnectOptions().apply {
+    setWill(
+        "system/events/disconnect",
+        "Client disconnected".toByteArray(),
+        1,  // QoS
+        false  // Retain
+    )
+}
+```
+
+### Connection Pooling
+
+For high-throughput applications, use connection pooling:
+
+```kotlin
+val factory = DefaultMqttPahoClientFactory()
+factory.connectionOptions = options
+
+// Spring Integration automatically manages connection pool
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection Refused (Error Code 5)">
+    **Cause:** Invalid username/password
+
+    **Solution:**
+    - Verify credentials in `MqttUsers` table (`mqtt_users` schema)
+    - Check ACL permissions in `MqttAcl` table
+    - Ensure user `isActive = true`
+  </Accordion>
+
+  <Accordion title="Client ID Already in Use">
+    **Cause:** Another client connected with same ID
+
+    **Solution:**
+    - Generate unique client ID: `greenhouse-client-${UUID.randomUUID()}`
+    - Set `clean_session = true` to force disconnect previous client
+  </Accordion>
+
+  <Accordion title="WebSocket Connection Failed">
+    **Cause:** CORS policy or wrong port
+
+    **Solution:**
+    - Use WSS port `8084` for secure connections
+    - Check EMQX dashboard CORS settings
+    - Verify firewall allows outbound connections on port 8084
+  </Accordion>
+
+  <Accordion title="Messages Not Received">
+    **Cause:** Incorrect topic subscription or QoS mismatch
+
+    **Solution:**
+    - Verify topic pattern matches published topics
+    - Use wildcards: `+` (single level), `#` (multi-level)
+    - Check QoS level (API uses QoS 0 by default)
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Message Format" icon="code" href="./message-format">
+    Learn the JSON payload structure with 22 sensor fields
+  </Card>
+  <Card title="Authentication" icon="lock" href="./authentication">
+    Configure MQTT user credentials and ACLs
+  </Card>
+</CardGroup>

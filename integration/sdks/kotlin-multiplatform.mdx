@@ -1,0 +1,620 @@
+---
+title: "Kotlin Multiplatform SDK"
+description: "Integrate Invernaderos API with Kotlin Multiplatform applications for Android, iOS, and Desktop"
+---
+
+## Overview
+
+This guide demonstrates how to integrate the Invernaderos API into Kotlin Multiplatform (KMP) applications. The API provides real-time greenhouse monitoring data via REST endpoints and WebSocket connections.
+
+**Base URL**: `https://api.invernaderos.example.com/api/v1`
+
+## Features
+
+- JWT-based authentication
+- REST API for historical data queries
+- WebSocket/STOMP for real-time sensor updates
+- Coroutine-based async operations
+- Multi-tenant support
+
+## Setup
+
+### Dependencies
+
+Add these dependencies to your `build.gradle.kts`:
+
+```kotlin
+val ktorVersion = "2.3.7"
+val coroutinesVersion = "1.7.3"
+
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            // HTTP client
+            implementation("io.ktor:ktor-client-core:$ktorVersion")
+            implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
+            implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
+            implementation("io.ktor:ktor-client-auth:$ktorVersion")
+            implementation("io.ktor:ktor-client-websockets:$ktorVersion")
+            
+            // Coroutines
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
+            
+            // JSON serialization
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+        }
+        
+        androidMain.dependencies {
+            implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
+        }
+        
+        iosMain.dependencies {
+            implementation("io.ktor:ktor-client-darwin:$ktorVersion")
+        }
+    }
+}
+```
+
+## Authentication
+
+### JWT Token Management
+
+Implement a token manager to handle authentication:
+
+```kotlin
+import io.ktor.client.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class LoginRequest(
+    val username: String,
+    val password: String
+)
+
+@Serializable
+data class JwtResponse(
+    val token: String,
+    val type: String = "Bearer",
+    val username: String,
+    val roles: List<String>
+)
+
+class AuthManager(private val client: HttpClient) {
+    private var currentToken: String? = null
+    
+    suspend fun login(username: String, password: String): Result<String> {
+        return try {
+            val response: HttpResponse = client.post("$BASE_URL/auth/login") {
+                contentType(ContentType.Application.Json)
+                setBody(LoginRequest(username, password))
+            }
+            
+            val jwtResponse = Json.decodeFromString<JwtResponse>(response.bodyAsText())
+            currentToken = jwtResponse.token
+            Result.success(jwtResponse.token)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    fun getToken(): String? = currentToken
+    
+    fun isAuthenticated(): Boolean = currentToken != null
+    
+    fun logout() {
+        currentToken = null
+    }
+    
+    companion object {
+        private const val BASE_URL = "https://api.invernaderos.example.com/api/v1"
+    }
+}
+```
+
+### HTTP Client Configuration
+
+Configure Ktor client with JWT authentication:
+
+```kotlin
+import io.ktor.client.*
+import io.ktor.client.plugins.auth.*
+import io.ktor.client.plugins.auth.providers.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.plugins.logging.*
+import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.json.Json
+
+class InvernaderosApiClient(private val authManager: AuthManager) {
+    val client = HttpClient {
+        install(ContentNegotiation) {
+            json(Json {
+                prettyPrint = true
+                isLenient = true
+                ignoreUnknownKeys = true
+            })
+        }
+        
+        install(Auth) {
+            bearer {
+                loadTokens {
+                    authManager.getToken()?.let { token ->
+                        BearerTokens(token, token)
+                    }
+                }
+                
+                refreshTokens {
+                    // Implement token refresh logic if needed
+                    null
+                }
+            }
+        }
+        
+        install(Logging) {
+            logger = Logger.DEFAULT
+            level = LogLevel.INFO
+        }
+    }
+}
+```
+
+<Note>
+The API uses **Bearer token authentication**. Include the JWT token in the `Authorization` header for all authenticated requests.
+</Note>
+
+## API Integration
+
+### Data Models
+
+Define the data models matching the API responses:
+
+```kotlin
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.datetime.Instant
+
+@Serializable
+data class RealDataDto(
+    val timestamp: Instant,
+    
+    @SerialName("TEMPERATURA INVERNADERO 01")
+    val temperaturaInvernadero01: Double? = null,
+    
+    @SerialName("HUMEDAD INVERNADERO 01")
+    val humedadInvernadero01: Double? = null,
+    
+    @SerialName("TEMPERATURA INVERNADERO 02")
+    val temperaturaInvernadero02: Double? = null,
+    
+    @SerialName("HUMEDAD INVERNADERO 02")
+    val humedadInvernadero02: Double? = null,
+    
+    @SerialName("TEMPERATURA INVERNADERO 03")
+    val temperaturaInvernadero03: Double? = null,
+    
+    @SerialName("HUMEDAD INVERNADERO 03")
+    val humedadInvernadero03: Double? = null,
+    
+    @SerialName("INVERNADERO_01_SECTOR_01")
+    val invernadero01Sector01: Double? = null,
+    
+    @SerialName("INVERNADERO_01_SECTOR_02")
+    val invernadero01Sector02: Double? = null,
+    
+    @SerialName("INVERNADERO_01_EXTRACTOR")
+    val invernadero01Extractor: Double? = null,
+    
+    // Add remaining fields as needed
+    
+    val greenhouseId: String? = null,
+    val tenantId: String? = null
+)
+
+@Serializable
+data class SensorReadingResponse(
+    val time: Instant,
+    val sensorId: String,
+    val greenhouseId: String,
+    val sensorType: String,
+    val value: Double,
+    val unit: String?
+)
+```
+
+### Repository Pattern
+
+Implement a repository for data access:
+
+<CodeGroup>
+```kotlin Interface
+interface GreenhouseRepository {
+    suspend fun getRecentMessages(tenantId: String?, limit: Int): Result<List<RealDataDto>>
+    suspend fun getMessagesByTimeRange(
+        tenantId: String?,
+        from: Instant,
+        to: Instant
+    ): Result<List<RealDataDto>>
+    suspend fun getLatestSensorReadings(
+        greenhouseId: String?,
+        limit: Int
+    ): Result<List<SensorReadingResponse>>
+    suspend fun getCurrentSensorValues(greenhouseId: Long): Result<Map<String, Any?>>
+}
+```
+
+```kotlin Implementation
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.request.*
+import kotlinx.datetime.Instant
+
+class GreenhouseRepositoryImpl(
+    private val client: HttpClient,
+    private val baseUrl: String = "https://api.invernaderos.example.com/api/v1"
+) : GreenhouseRepository {
+    
+    override suspend fun getRecentMessages(
+        tenantId: String?,
+        limit: Int
+    ): Result<List<RealDataDto>> {
+        return try {
+            val response = client.get("$baseUrl/greenhouse/messages/recent") {
+                parameter("tenantId", tenantId)
+                parameter("limit", limit)
+            }
+            Result.success(response.body())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    override suspend fun getMessagesByTimeRange(
+        tenantId: String?,
+        from: Instant,
+        to: Instant
+    ): Result<List<RealDataDto>> {
+        return try {
+            val response = client.get("$baseUrl/greenhouse/messages/range") {
+                parameter("tenantId", tenantId)
+                parameter("from", from.toString())
+                parameter("to", to.toString())
+            }
+            Result.success(response.body())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    override suspend fun getLatestSensorReadings(
+        greenhouseId: String?,
+        limit: Int
+    ): Result<List<SensorReadingResponse>> {
+        return try {
+            val response = client.get("$baseUrl/sensors/latest") {
+                parameter("greenhouseId", greenhouseId)
+                parameter("limit", limit)
+            }
+            Result.success(response.body())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    
+    override suspend fun getCurrentSensorValues(
+        greenhouseId: Long
+    ): Result<Map<String, Any?>> {
+        return try {
+            val response = client.get("$baseUrl/sensors/current") {
+                parameter("greenhouseId", greenhouseId)
+            }
+            Result.success(response.body())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
+```
+</CodeGroup>
+
+## Coroutine-Based Async Patterns
+
+### ViewModel Integration (Android/iOS)
+
+Use coroutines for non-blocking API calls:
+
+```kotlin
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+
+class GreenhouseViewModel(
+    private val repository: GreenhouseRepository,
+    private val scope: CoroutineScope
+) {
+    private val _uiState = MutableStateFlow<UiState>(UiState.Loading)
+    val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+    
+    fun loadRecentData(tenantId: String? = null, limit: Int = 100) {
+        scope.launch {
+            _uiState.value = UiState.Loading
+            
+            repository.getRecentMessages(tenantId, limit)
+                .onSuccess { messages ->
+                    _uiState.value = UiState.Success(messages)
+                }
+                .onFailure { error ->
+                    _uiState.value = UiState.Error(error.message ?: "Unknown error")
+                }
+        }
+    }
+    
+    fun loadTimeRange(tenantId: String?, from: Instant, to: Instant) {
+        scope.launch {
+            _uiState.value = UiState.Loading
+            
+            repository.getMessagesByTimeRange(tenantId, from, to)
+                .onSuccess { messages ->
+                    _uiState.value = UiState.Success(messages)
+                }
+                .onFailure { error ->
+                    _uiState.value = UiState.Error(error.message ?: "Unknown error")
+                }
+        }
+    }
+    
+    sealed class UiState {
+        object Loading : UiState()
+        data class Success(val data: List<RealDataDto>) : UiState()
+        data class Error(val message: String) : UiState()
+    }
+}
+```
+
+### Flow-Based Data Streams
+
+Create reactive data streams:
+
+```kotlin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.*
+
+class GreenhouseDataStream(private val repository: GreenhouseRepository) {
+    
+    /**
+     * Poll for latest sensor data every 5 seconds
+     */
+    fun observeLatestData(tenantId: String?): Flow<Result<List<RealDataDto>>> = flow {
+        while (true) {
+            emit(repository.getRecentMessages(tenantId, 10))
+            delay(5000) // 5 seconds
+        }
+    }.catch { e ->
+        emit(Result.failure(e))
+    }
+    
+    /**
+     * Observe current sensor values with periodic updates
+     */
+    fun observeSensorValues(greenhouseId: Long): Flow<Result<Map<String, Any?>>> = flow {
+        while (true) {
+            emit(repository.getCurrentSensorValues(greenhouseId))
+            delay(5000)
+        }
+    }.catch { e ->
+        emit(Result.failure(e))
+    }
+}
+```
+
+## WebSocket Integration
+
+For real-time updates, connect to the WebSocket endpoint:
+
+```kotlin
+import io.ktor.client.*
+import io.ktor.client.plugins.websocket.*
+import io.ktor.websocket.*
+import kotlinx.coroutines.flow.*
+
+class WebSocketManager(private val client: HttpClient) {
+    
+    private val _messages = MutableSharedFlow<RealDataDto>()
+    val messages: SharedFlow<RealDataDto> = _messages.asSharedFlow()
+    
+    suspend fun connect(token: String) {
+        client.webSocket(
+            host = "api.invernaderos.example.com",
+            port = 443,
+            path = "/ws/greenhouse"
+        ) {
+            // Send STOMP CONNECT frame
+            send(Frame.Text(buildStompConnect(token)))
+            
+            // Subscribe to greenhouse messages topic
+            send(Frame.Text(buildStompSubscribe("/topic/greenhouse/messages")))
+            
+            // Listen for incoming messages
+            for (frame in incoming) {
+                when (frame) {
+                    is Frame.Text -> {
+                        val text = frame.readText()
+                        handleStompFrame(text)
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    
+    private fun buildStompConnect(token: String): String {
+        return """
+            CONNECT
+            accept-version:1.2
+            authorization:Bearer $token
+            
+            \u0000
+        """.trimIndent()
+    }
+    
+    private fun buildStompSubscribe(destination: String): String {
+        return """
+            SUBSCRIBE
+            id:sub-0
+            destination:$destination
+            
+            \u0000
+        """.trimIndent()
+    }
+    
+    private suspend fun handleStompFrame(frame: String) {
+        if (frame.startsWith("MESSAGE")) {
+            // Extract JSON body from STOMP message
+            val bodyStart = frame.indexOf("\n\n") + 2
+            val body = frame.substring(bodyStart).trim('\u0000')
+            
+            try {
+                val message = Json.decodeFromString<RealDataDto>(body)
+                _messages.emit(message)
+            } catch (e: Exception) {
+                println("Error parsing message: ${e.message}")
+            }
+        }
+    }
+}
+```
+
+<Note>
+The WebSocket uses **STOMP protocol** over WebSocket. Subscribe to `/topic/greenhouse/messages` to receive real-time sensor data updates.
+</Note>
+
+## Complete Usage Example
+
+<Steps>
+  <Step title="Initialize the client">
+    ```kotlin
+    val authManager = AuthManager(HttpClient())
+    val apiClient = InvernaderosApiClient(authManager)
+    val repository = GreenhouseRepositoryImpl(apiClient.client)
+    ```
+  </Step>
+  
+  <Step title="Authenticate">
+    ```kotlin
+    val result = authManager.login("user@example.com", "password")
+    result.onSuccess { token ->
+        println("Authenticated with token: $token")
+    }.onFailure { error ->
+        println("Authentication failed: ${error.message}")
+    }
+    ```
+  </Step>
+  
+  <Step title="Fetch historical data">
+    ```kotlin
+    val scope = CoroutineScope(Dispatchers.Default)
+    scope.launch {
+        repository.getRecentMessages("SARA", 50)
+            .onSuccess { messages ->
+                messages.forEach { message ->
+                    println("Temp: ${message.temperaturaInvernadero01}°C")
+                    println("Humidity: ${message.humedadInvernadero01}%")
+                }
+            }
+    }
+    ```
+  </Step>
+  
+  <Step title="Connect to WebSocket for real-time updates">
+    ```kotlin
+    val wsManager = WebSocketManager(apiClient.client)
+    
+    scope.launch {
+        wsManager.messages.collect { message ->
+            println("Real-time update: ${message.timestamp}")
+            println("Temp: ${message.temperaturaInvernadero01}°C")
+        }
+    }
+    
+    scope.launch {
+        authManager.getToken()?.let { token ->
+            wsManager.connect(token)
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Error Handling
+
+Implement robust error handling:
+
+```kotlin
+sealed class ApiError : Exception() {
+    data class NetworkError(override val message: String) : ApiError()
+    data class AuthenticationError(override val message: String) : ApiError()
+    data class ServerError(val code: Int, override val message: String) : ApiError()
+    data class UnknownError(override val message: String) : ApiError()
+}
+
+fun handleApiError(error: Throwable): ApiError {
+    return when (error) {
+        is UnresolvedAddressException -> ApiError.NetworkError("No internet connection")
+        is ClientRequestException -> {
+            when (error.response.status.value) {
+                401 -> ApiError.AuthenticationError("Invalid credentials")
+                403 -> ApiError.AuthenticationError("Access denied")
+                else -> ApiError.ServerError(
+                    error.response.status.value,
+                    error.message
+                )
+            }
+        }
+        else -> ApiError.UnknownError(error.message ?: "Unknown error")
+    }
+}
+```
+
+## Multi-Tenant Support
+
+The API supports multiple tenants. Include the `tenantId` parameter in requests:
+
+```kotlin
+// Get data for specific tenant
+repository.getRecentMessages(tenantId = "SARA", limit = 100)
+
+// Get data for default tenant (backward compatibility)
+repository.getRecentMessages(tenantId = null, limit = 100)
+```
+
+## Best Practices
+
+1. **Token Management**: Store JWT tokens securely using platform-specific secure storage (Keychain on iOS, EncryptedSharedPreferences on Android)
+2. **Connection Pooling**: Reuse the same HttpClient instance across your application
+3. **Error Recovery**: Implement retry logic with exponential backoff for network failures
+4. **WebSocket Reconnection**: Handle connection drops and implement automatic reconnection
+5. **Coroutine Scopes**: Use appropriate coroutine scopes (viewModelScope, lifecycleScope) to prevent memory leaks
+6. **Resource Cleanup**: Close HttpClient and WebSocket connections when no longer needed
+
+## Platform-Specific Notes
+
+### Android
+- Use OkHttp engine for better performance
+- Handle lifecycle events to manage connections
+- Use WorkManager for background data synchronization
+
+### iOS
+- Use Darwin engine (NSURLSession)
+- Handle app state transitions (background/foreground)
+- Use background URLSession for data downloads
+
+### Desktop (JVM)
+- Use CIO or Java engine
+- Consider using compose desktop for UI
+- Implement proper shutdown hooks
+
+## Next Steps
+
+- [Mobile Apps Integration](/integration/sdks/mobile-apps) - Platform-specific mobile integration patterns
+- [WebSocket Guide](/integration/mqtt/websocket) - Advanced WebSocket configuration
+- [Authentication](/api-reference/auth) - Detailed authentication reference

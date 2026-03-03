@@ -1,0 +1,602 @@
+---
+title: "Device Management"
+description: "Manage IoT devices (sensors and actuators) for tenants"
+---
+
+## Get All Devices
+
+<api method="GET" url="/api/v1/tenants/{tenantId}/devices" />
+
+Retrieve all devices (sensors and actuators) for a specific tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  ID of the tenant
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">
+  Unique ID of the device (TSID - Time-Sorted ID)
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unique code per tenant (e.g., DEV-00001)
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant owning this device
+</ResponseField>
+
+<ResponseField name="sectorId" type="long">
+  ID of the sector where the device is installed
+</ResponseField>
+
+<ResponseField name="sectorCode" type="string" optional>
+  Code of the sector
+</ResponseField>
+
+<ResponseField name="name" type="string" optional>
+  Human-readable name (e.g., "Temperature Sensor Greenhouse 1")
+</ResponseField>
+
+<ResponseField name="categoryId" type="integer" optional>
+  Category ID (1=SENSOR, 2=ACTUATOR)
+</ResponseField>
+
+<ResponseField name="categoryName" type="string" optional>
+  Category name (SENSOR or ACTUATOR)
+</ResponseField>
+
+<ResponseField name="typeId" type="integer" optional>
+  Device type ID (e.g., 1=TEMPERATURE, 2=HUMIDITY, 3=VALVE)
+</ResponseField>
+
+<ResponseField name="typeName" type="string" optional>
+  Device type name
+</ResponseField>
+
+<ResponseField name="unitId" type="integer" optional>
+  Unit of measurement ID
+</ResponseField>
+
+<ResponseField name="unitSymbol" type="string" optional>
+  Unit symbol (°C, %, ppm, etc.)
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the device is active
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string">
+  Last update timestamp (ISO 8601)
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/tenants/123/devices" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const tenantId = 123;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/tenants/${tenantId}/devices`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': 'Bearer YOUR_TOKEN'
+    }
+  }
+);
+
+const devices = await response.json();
+```
+
+```python Python
+import requests
+
+tenant_id = 123
+
+response = requests.get(
+    f'https://api.example.com/api/v1/tenants/{tenant_id}/devices',
+    headers={
+        'Accept': 'application/json',
+        'Authorization': 'Bearer YOUR_TOKEN'
+    }
+)
+
+devices = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+[
+  {
+    "id": 456789012345,
+    "code": "DEV-00001",
+    "tenantId": 123,
+    "sectorId": 789,
+    "sectorCode": "SEC-01",
+    "name": "Temperature Sensor Greenhouse 1",
+    "categoryId": 1,
+    "categoryName": "SENSOR",
+    "typeId": 1,
+    "typeName": "TEMPERATURE",
+    "unitId": 1,
+    "unitSymbol": "°C",
+    "isActive": true,
+    "createdAt": "2025-03-01T10:00:00Z",
+    "updatedAt": "2025-03-01T10:00:00Z"
+  },
+  {
+    "id": 456789012346,
+    "code": "DEV-00002",
+    "tenantId": 123,
+    "sectorId": 789,
+    "sectorCode": "SEC-01",
+    "name": "Humidity Sensor Greenhouse 1",
+    "categoryId": 1,
+    "categoryName": "SENSOR",
+    "typeId": 2,
+    "typeName": "HUMIDITY",
+    "unitId": 2,
+    "unitSymbol": "%",
+    "isActive": true,
+    "createdAt": "2025-03-01T10:05:00Z",
+    "updatedAt": "2025-03-01T10:05:00Z"
+  }
+]
+```
+
+---
+
+## Get Device by ID
+
+<api method="GET" url="/api/v1/tenants/{tenantId}/devices/{deviceId}" />
+
+Retrieve a specific device by its ID.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  ID of the tenant
+</ParamField>
+
+<ParamField path="deviceId" type="long" required>
+  ID of the device
+</ParamField>
+
+### Response
+
+Returns a single device object (same structure as "Get All Devices").
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/tenants/123/devices/456789012345" \
+  -H "Accept: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const tenantId = 123;
+const deviceId = 456789012345;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/tenants/${tenantId}/devices/${deviceId}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'Authorization': 'Bearer YOUR_TOKEN'
+    }
+  }
+);
+
+const device = await response.json();
+```
+
+```python Python
+import requests
+
+tenant_id = 123
+device_id = 456789012345
+
+response = requests.get(
+    f'https://api.example.com/api/v1/tenants/{tenant_id}/devices/{device_id}',
+    headers={
+        'Accept': 'application/json',
+        'Authorization': 'Bearer YOUR_TOKEN'
+    }
+)
+
+device = response.json()
+```
+
+</CodeGroup>
+
+---
+
+## Create Device
+
+<api method="POST" url="/api/v1/tenants/{tenantId}/devices" />
+
+Create a new device for a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  ID of the tenant
+</ParamField>
+
+### Request Body
+
+<ParamField body="sectorId" type="long" required>
+  ID of the sector where the device will be installed
+</ParamField>
+
+<ParamField body="name" type="string" optional>
+  Human-readable name (max 100 characters)
+</ParamField>
+
+<ParamField body="categoryId" type="integer" optional>
+  Category ID (1=SENSOR, 2=ACTUATOR)
+</ParamField>
+
+<ParamField body="typeId" type="integer" optional>
+  Device type ID (e.g., 1=TEMPERATURE, 2=HUMIDITY)
+</ParamField>
+
+<ParamField body="unitId" type="integer" optional>
+  Unit of measurement ID
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the device is active
+</ParamField>
+
+### Response
+
+Returns the created device object with status code `201 Created`.
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X POST "https://api.example.com/api/v1/tenants/123/devices" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "sectorId": 789,
+    "name": "CO2 Sensor Greenhouse 2",
+    "categoryId": 1,
+    "typeId": 5,
+    "unitId": 5,
+    "isActive": true
+  }'
+```
+
+```javascript JavaScript
+const tenantId = 123;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/tenants/${tenantId}/devices`,
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_TOKEN'
+    },
+    body: JSON.stringify({
+      sectorId: 789,
+      name: 'CO2 Sensor Greenhouse 2',
+      categoryId: 1,
+      typeId: 5,
+      unitId: 5,
+      isActive: true
+    })
+  }
+);
+
+const device = await response.json();
+```
+
+```python Python
+import requests
+
+tenant_id = 123
+
+response = requests.post(
+    f'https://api.example.com/api/v1/tenants/{tenant_id}/devices',
+    headers={
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer YOUR_TOKEN'
+    },
+    json={
+        'sectorId': 789,
+        'name': 'CO2 Sensor Greenhouse 2',
+        'categoryId': 1,
+        'typeId': 5,
+        'unitId': 5,
+        'isActive': True
+    }
+)
+
+device = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "id": 456789012347,
+  "code": "DEV-00003",
+  "tenantId": 123,
+  "sectorId": 789,
+  "sectorCode": "SEC-02",
+  "name": "CO2 Sensor Greenhouse 2",
+  "categoryId": 1,
+  "categoryName": "SENSOR",
+  "typeId": 5,
+  "typeName": "CO2",
+  "unitId": 5,
+  "unitSymbol": "ppm",
+  "isActive": true,
+  "createdAt": "2025-03-03T15:30:00Z",
+  "updatedAt": "2025-03-03T15:30:00Z"
+}
+```
+
+---
+
+## Update Device
+
+<api method="PUT" url="/api/v1/tenants/{tenantId}/devices/{deviceId}" />
+
+Update an existing device.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  ID of the tenant
+</ParamField>
+
+<ParamField path="deviceId" type="long" required>
+  ID of the device to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only include fields you want to update.
+
+<ParamField body="sectorId" type="long" optional>
+  ID of the sector (must belong to the same tenant)
+</ParamField>
+
+<ParamField body="name" type="string" optional>
+  Human-readable name (max 100 characters)
+</ParamField>
+
+<ParamField body="categoryId" type="integer" optional>
+  Category ID (1=SENSOR, 2=ACTUATOR)
+</ParamField>
+
+<ParamField body="typeId" type="integer" optional>
+  Device type ID
+</ParamField>
+
+<ParamField body="unitId" type="integer" optional>
+  Unit of measurement ID
+</ParamField>
+
+<ParamField body="isActive" type="boolean" optional>
+  Whether the device is active
+</ParamField>
+
+### Response
+
+Returns the updated device object.
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X PUT "https://api.example.com/api/v1/tenants/123/devices/456789012347" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{
+    "name": "CO2 Sensor - Updated Name",
+    "isActive": false
+  }'
+```
+
+```javascript JavaScript
+const tenantId = 123;
+const deviceId = 456789012347;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/tenants/${tenantId}/devices/${deviceId}`,
+  {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_TOKEN'
+    },
+    body: JSON.stringify({
+      name: 'CO2 Sensor - Updated Name',
+      isActive: false
+    })
+  }
+);
+
+const updatedDevice = await response.json();
+```
+
+```python Python
+import requests
+
+tenant_id = 123
+device_id = 456789012347
+
+response = requests.put(
+    f'https://api.example.com/api/v1/tenants/{tenant_id}/devices/{device_id}',
+    headers={
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer YOUR_TOKEN'
+    },
+    json={
+        'name': 'CO2 Sensor - Updated Name',
+        'isActive': False
+    }
+)
+
+updated_device = response.json()
+```
+
+</CodeGroup>
+
+---
+
+## Delete Device
+
+<api method="DELETE" url="/api/v1/tenants/{tenantId}/devices/{deviceId}" />
+
+Delete a device from a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  ID of the tenant
+</ParamField>
+
+<ParamField path="deviceId" type="long" required>
+  ID of the device to delete
+</ParamField>
+
+### Response
+
+Returns status code `204 No Content` on success, or `404 Not Found` if the device doesn't exist.
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X DELETE "https://api.example.com/api/v1/tenants/123/devices/456789012347" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```javascript JavaScript
+const tenantId = 123;
+const deviceId = 456789012347;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/tenants/${tenantId}/devices/${deviceId}`,
+  {
+    method: 'DELETE',
+    headers: {
+      'Authorization': 'Bearer YOUR_TOKEN'
+    }
+  }
+);
+
+if (response.status === 204) {
+  console.log('Device deleted successfully');
+}
+```
+
+```python Python
+import requests
+
+tenant_id = 123
+device_id = 456789012347
+
+response = requests.delete(
+    f'https://api.example.com/api/v1/tenants/{tenant_id}/devices/{device_id}',
+    headers={'Authorization': 'Bearer YOUR_TOKEN'}
+)
+
+if response.status_code == 204:
+    print('Device deleted successfully')
+```
+
+</CodeGroup>
+
+---
+
+## Device Categories
+
+Devices are categorized into two main types:
+
+### 1. Sensors
+- **Category ID**: 1
+- **Purpose**: Collect environmental data
+- **Types**: Temperature, Humidity, CO2, Light, Soil Moisture, Atmospheric Pressure
+- **Data Flow**: Sensors → MQTT → API → Database
+
+### 2. Actuators
+- **Category ID**: 2
+- **Purpose**: Control greenhouse systems
+- **Types**: Valves, Fans, Heaters, Lights, Vents
+- **Data Flow**: API → MQTT → Actuators
+- **Control Modes**: Manual, Automatic, Scheduled
+
+## Device Types
+
+Common device types include:
+
+| Type ID | Type Name | Category | Unit |
+|---------|-----------|----------|------|
+| 1 | TEMPERATURE | Sensor | °C |
+| 2 | HUMIDITY | Sensor | % |
+| 3 | SOIL_MOISTURE | Sensor | % |
+| 4 | LIGHT_INTENSITY | Sensor | lux |
+| 5 | CO2 | Sensor | ppm |
+| 6 | ATMOSPHERIC_PRESSURE | Sensor | hPa |
+| 7 | VALVE | Actuator | - |
+| 8 | FAN | Actuator | - |
+| 9 | HEATER | Actuator | - |
+| 10 | VENT | Actuator | - |
+
+## Device Hierarchy
+
+Devices are organized in a hierarchical structure:
+
+```
+Tenant
+  └── Greenhouse
+      └── Sector
+          └── Device (Sensor or Actuator)
+```
+
+- **Tenant**: The organization or customer
+- **Greenhouse**: Physical greenhouse location
+- **Sector**: Zone within a greenhouse (e.g., Zone A, Zone B)
+- **Device**: Individual sensor or actuator
+
+Each device:
+- Has a unique **code** per tenant (e.g., DEV-00001)
+- Belongs to exactly one **sector**
+- Inherits tenant context from its sector
+- Can be activated/deactivated via the `isActive` flag

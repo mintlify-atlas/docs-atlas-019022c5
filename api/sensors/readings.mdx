@@ -1,0 +1,330 @@
+---
+title: "Sensor Readings"
+description: "Retrieve and query sensor reading data with time ranges and filters"
+---
+
+## Get Latest Readings
+
+<api method="GET" url="/api/v1/sensors/latest" />
+
+Retrieve the most recent sensor readings, optionally filtered by greenhouse.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="string" optional>
+  ID of the greenhouse to filter by (defaults to "001")
+</ParamField>
+
+<ParamField query="limit" type="integer" default="10">
+  Maximum number of readings to return
+</ParamField>
+
+### Response
+
+<ResponseField name="time" type="string">
+  Timestamp of the reading (ISO 8601)
+</ResponseField>
+
+<ResponseField name="sensorId" type="string">
+  Unique identifier for the sensor
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="long">
+  ID of the greenhouse
+</ResponseField>
+
+<ResponseField name="tenantId" type="long" optional>
+  ID of the tenant owning this reading
+</ResponseField>
+
+<ResponseField name="sensorType" type="string">
+  Type of sensor (TEMPERATURE, HUMIDITY, CO2, LIGHT, etc.)
+</ResponseField>
+
+<ResponseField name="value" type="number">
+  Numeric value of the reading
+</ResponseField>
+
+<ResponseField name="unit" type="string" optional>
+  Unit of measurement (°C, %, ppm, lux, etc.)
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/sensors/latest?greenhouseId=001&limit=20" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const response = await fetch(
+  'https://api.example.com/api/v1/sensors/latest?greenhouseId=001&limit=20',
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const readings = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.example.com/api/v1/sensors/latest',
+    params={
+        'greenhouseId': '001',
+        'limit': 20
+    },
+    headers={'Accept': 'application/json'}
+)
+
+readings = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+[
+  {
+    "time": "2025-03-03T14:30:00Z",
+    "sensorId": "TEMP_01",
+    "greenhouseId": 123456789,
+    "tenantId": 987654321,
+    "sensorType": "TEMPERATURE",
+    "value": 22.5,
+    "unit": "°C"
+  },
+  {
+    "time": "2025-03-03T14:30:00Z",
+    "sensorId": "HUM_01",
+    "greenhouseId": 123456789,
+    "tenantId": 987654321,
+    "sensorType": "HUMIDITY",
+    "value": 65.0,
+    "unit": "%"
+  }
+]
+```
+
+---
+
+## Get Readings by Greenhouse
+
+<api method="GET" url="/api/v1/sensors/by-greenhouse/{greenhouseId}" />
+
+Retrieve all sensor readings for a specific greenhouse within a time window.
+
+### Path Parameters
+
+<ParamField path="greenhouseId" type="string" required>
+  ID of the greenhouse
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="hours" type="number" default="24">
+  Number of hours to look back from now
+</ParamField>
+
+### Response
+
+Returns an array of sensor readings (same structure as "Get Latest Readings").
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/sensors/by-greenhouse/001?hours=48" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const greenhouseId = '001';
+const hours = 48;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/sensors/by-greenhouse/${greenhouseId}?hours=${hours}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const readings = await response.json();
+```
+
+```python Python
+import requests
+
+greenhouse_id = '001'
+hours = 48
+
+response = requests.get(
+    f'https://api.example.com/api/v1/sensors/by-greenhouse/{greenhouse_id}',
+    params={'hours': hours},
+    headers={'Accept': 'application/json'}
+)
+
+readings = response.json()
+```
+
+</CodeGroup>
+
+---
+
+## Get Readings by Sensor ID
+
+<api method="GET" url="/api/v1/sensors/by-sensor/{sensorId}" />
+
+Retrieve all readings for a specific sensor within a time window.
+
+### Path Parameters
+
+<ParamField path="sensorId" type="string" required>
+  Unique identifier for the sensor
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="hoursAgo" type="number" default="24">
+  Number of hours to look back from now
+</ParamField>
+
+### Response
+
+Returns an array of sensor readings ordered by time.
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/sensors/by-sensor/TEMP_01?hoursAgo=24" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const sensorId = 'TEMP_01';
+const hoursAgo = 24;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/sensors/by-sensor/${sensorId}?hoursAgo=${hoursAgo}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const readings = await response.json();
+```
+
+```python Python
+import requests
+
+sensor_id = 'TEMP_01'
+hours_ago = 24
+
+response = requests.get(
+    f'https://api.example.com/api/v1/sensors/by-sensor/{sensor_id}',
+    params={'hoursAgo': hours_ago},
+    headers={'Accept': 'application/json'}
+)
+
+readings = response.json()
+```
+
+</CodeGroup>
+
+---
+
+## Get Current Sensor Values
+
+<api method="GET" url="/api/v1/sensors/current" />
+
+Retrieve the current (most recent) values for all sensors in a greenhouse.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="long" required>
+  ID of the greenhouse
+</ParamField>
+
+### Response
+
+Returns a map of sensor data with the latest value for each sensor.
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/sensors/current?greenhouseId=123456789" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const greenhouseId = 123456789;
+
+const response = await fetch(
+  `https://api.example.com/api/v1/sensors/current?greenhouseId=${greenhouseId}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const currentValues = await response.json();
+```
+
+```python Python
+import requests
+
+greenhouse_id = 123456789
+
+response = requests.get(
+    'https://api.example.com/api/v1/sensors/current',
+    params={'greenhouseId': greenhouse_id},
+    headers={'Accept': 'application/json'}
+)
+
+current_values = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "TEMP_01": {
+    "value": 22.5,
+    "unit": "°C",
+    "timestamp": "2025-03-03T14:30:00Z"
+  },
+  "HUM_01": {
+    "value": 65.0,
+    "unit": "%",
+    "timestamp": "2025-03-03T14:30:00Z"
+  },
+  "CO2_01": {
+    "value": 450.0,
+    "unit": "ppm",
+    "timestamp": "2025-03-03T14:30:00Z"
+  }
+}
+```

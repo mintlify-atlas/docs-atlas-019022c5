@@ -1,0 +1,997 @@
+---
+title: "Alert Catalog"
+description: "Manage alert types and severity levels"
+---
+
+## Overview
+
+The Alert Catalog defines:
+
+- **Alert Types**: Categories of alerts (THRESHOLD_EXCEEDED, SENSOR_OFFLINE, ACTUATOR_FAILURE, SYSTEM_ERROR)
+- **Alert Severities**: Priority levels (INFO, WARNING, ERROR, CRITICAL) with action requirements
+
+This catalog enables standardized alert classification and automated alert handling across the Invernaderos system.
+
+---
+
+## Alert Types
+
+### Get All Alert Types
+
+<CodeGroup>
+```bash GET /api/v1/catalog/alert-types
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/alert-types" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all available alert types.
+
+### Response
+
+<ResponseField name="data" type="array">
+  Array of alert type objects
+  
+  <Expandable title="AlertTypeResponse">
+    <ResponseField name="id" type="short" required>
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Alert type name (e.g., "THRESHOLD_EXCEEDED", "SENSOR_OFFLINE")
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the alert type
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 1,
+    "name": "THRESHOLD_EXCEEDED",
+    "description": "Sensor value exceeded configured threshold"
+  },
+  {
+    "id": 2,
+    "name": "SENSOR_OFFLINE",
+    "description": "Sensor has not reported data in expected timeframe"
+  },
+  {
+    "id": 3,
+    "name": "ACTUATOR_FAILURE",
+    "description": "Actuator failed to execute command or reported error state"
+  },
+  {
+    "id": 4,
+    "name": "SYSTEM_ERROR",
+    "description": "System-level error occurred (database, network, etc.)"
+  }
+]
+```
+</ResponseExample>
+
+<Note>
+  **System Alert Types**
+  
+  Common alert types with predefined IDs:
+  - **ID 1** = THRESHOLD_EXCEEDED (sensor value out of range)
+  - **ID 2** = SENSOR_OFFLINE (sensor not responding)
+  - **ID 3** = ACTUATOR_FAILURE (actuator malfunction)
+  - **ID 4** = SYSTEM_ERROR (system-level issues)
+</Note>
+
+---
+
+### Get Alert Type by ID
+
+<CodeGroup>
+```bash GET /api/v1/catalog/alert-types/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/alert-types/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert type ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 1,
+  "name": "THRESHOLD_EXCEEDED",
+  "description": "Sensor value exceeded configured threshold"
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Alert type not found"
+}
+```
+</ResponseExample>
+
+---
+
+### Create Alert Type
+
+<CodeGroup>
+```bash POST /api/v1/catalog/alert-types
+curl -X POST "https://api.invernaderos.com/api/v1/catalog/alert-types" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "MAINTENANCE_REQUIRED",
+    "description": "Scheduled maintenance is due for greenhouse equipment"
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Alert type name (max 30 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the alert type
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": 5,
+  "name": "MAINTENANCE_REQUIRED",
+  "description": "Scheduled maintenance is due for greenhouse equipment"
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Alert type 'MAINTENANCE_REQUIRED' already exists"
+}
+```
+</ResponseExample>
+
+---
+
+### Update Alert Type
+
+<CodeGroup>
+```bash PUT /api/v1/catalog/alert-types/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/catalog/alert-types/5" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Preventive maintenance is due for greenhouse equipment within 7 days"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert type ID to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New alert type name (max 30 characters, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+### Response
+
+Same structure as "Create Alert Type" with updated values.
+
+---
+
+### Delete Alert Type
+
+<CodeGroup>
+```bash DELETE /api/v1/catalog/alert-types/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/catalog/alert-types/5" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert type ID to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 204 No Content
+Alert type deleted successfully (no body)
+```
+
+```json 404 Not Found
+{
+  "error": "Alert type not found"
+}
+```
+
+```json 409 Conflict - Associated Alerts Exist
+{
+  "error": "Cannot delete alert type 'THRESHOLD_EXCEEDED' because 145 alerts are using it"
+}
+```
+</ResponseExample>
+
+<Warning>
+  **Deletion Constraints**
+  
+  Cannot delete alert types that have associated alert records. You must:
+  
+  1. Delete or archive all alerts using this type first, OR
+  2. Consider if this type should remain for historical data
+</Warning>
+
+---
+
+## Alert Severities
+
+### Get All Alert Severities
+
+<CodeGroup>
+```bash GET /api/v1/catalog/alert-severities
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/alert-severities" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all severity levels ordered by level (1=lowest, 4=highest).
+
+### Response
+
+<ResponseField name="data" type="array">
+  Array of alert severity objects
+  
+  <Expandable title="AlertSeverityResponse">
+    <ResponseField name="id" type="short" required>
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Severity name (e.g., "INFO", "WARNING", "ERROR", "CRITICAL")
+    </ResponseField>
+    
+    <ResponseField name="level" type="short" required>
+      Numeric level for sorting (1=lowest, higher=more severe)
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the severity level
+    </ResponseField>
+    
+    <ResponseField name="color" type="string">
+      Hex color code for UI visualization (e.g., "#0066FF")
+    </ResponseField>
+    
+    <ResponseField name="requiresAction" type="boolean" required>
+      Whether immediate action is required
+    </ResponseField>
+    
+    <ResponseField name="notificationDelayMinutes" type="integer" required>
+      Minutes to wait before sending notification (0=immediate)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 1,
+    "name": "INFO",
+    "level": 1,
+    "description": "Informational message, no action required",
+    "color": "#0066FF",
+    "requiresAction": false,
+    "notificationDelayMinutes": 60
+  },
+  {
+    "id": 2,
+    "name": "WARNING",
+    "level": 2,
+    "description": "Potential issue, should be reviewed",
+    "color": "#FFA500",
+    "requiresAction": false,
+    "notificationDelayMinutes": 15
+  },
+  {
+    "id": 3,
+    "name": "ERROR",
+    "level": 3,
+    "description": "Error occurred, action required soon",
+    "color": "#FF6600",
+    "requiresAction": true,
+    "notificationDelayMinutes": 5
+  },
+  {
+    "id": 4,
+    "name": "CRITICAL",
+    "level": 4,
+    "description": "Critical issue, immediate action required",
+    "color": "#FF0000",
+    "requiresAction": true,
+    "notificationDelayMinutes": 0
+  }
+]
+```
+</ResponseExample>
+
+<Note>
+  **System Severity Levels**
+  
+  Standard severity levels with predefined IDs:
+  - **ID 1** = INFO (level 1, blue, no action required)
+  - **ID 2** = WARNING (level 2, orange, review recommended)
+  - **ID 3** = ERROR (level 3, dark orange, action required)
+  - **ID 4** = CRITICAL (level 4, red, immediate action required)
+</Note>
+
+---
+
+### Get Critical Severities
+
+<CodeGroup>
+```bash GET /api/v1/catalog/alert-severities/critical
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/alert-severities/critical" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves only severities that require immediate action (`requiresAction = true`).
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 3,
+    "name": "ERROR",
+    "level": 3,
+    "description": "Error occurred, action required soon",
+    "color": "#FF6600",
+    "requiresAction": true,
+    "notificationDelayMinutes": 5
+  },
+  {
+    "id": 4,
+    "name": "CRITICAL",
+    "level": 4,
+    "description": "Critical issue, immediate action required",
+    "color": "#FF0000",
+    "requiresAction": true,
+    "notificationDelayMinutes": 0
+  }
+]
+```
+</ResponseExample>
+
+**Use Case**: Filter alerts that require user attention in dashboards.
+
+---
+
+### Get Alert Severity by ID
+
+<CodeGroup>
+```bash GET /api/v1/catalog/alert-severities/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/alert-severities/4" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert severity ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 4,
+  "name": "CRITICAL",
+  "level": 4,
+  "description": "Critical issue, immediate action required",
+  "color": "#FF0000",
+  "requiresAction": true,
+  "notificationDelayMinutes": 0
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Alert severity not found"
+}
+```
+</ResponseExample>
+
+---
+
+### Create Alert Severity
+
+<CodeGroup>
+```bash POST /api/v1/catalog/alert-severities
+curl -X POST "https://api.invernaderos.com/api/v1/catalog/alert-severities" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "URGENT",
+    "level": 5,
+    "description": "Extremely urgent issue requiring immediate escalation",
+    "color": "#8B0000",
+    "requiresAction": true,
+    "notificationDelayMinutes": 0
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Severity name (max 20 characters, must be unique)
+</ParamField>
+
+<ParamField body="level" type="short" required>
+  Numeric level for sorting (1=lowest, higher=more severe, must be positive)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the severity level
+</ParamField>
+
+<ParamField body="color" type="string">
+  Hex color code (format: `#RRGGBB`, e.g., "#FF0000")
+</ParamField>
+
+<ParamField body="requiresAction" type="boolean" default="false">
+  Whether immediate action is required
+</ParamField>
+
+<ParamField body="notificationDelayMinutes" type="integer" default="0">
+  Minutes to wait before sending notification (minimum 0)
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": 5,
+  "name": "URGENT",
+  "level": 5,
+  "description": "Extremely urgent issue requiring immediate escalation",
+  "color": "#8B0000",
+  "requiresAction": true,
+  "notificationDelayMinutes": 0
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Alert severity 'URGENT' already exists"
+}
+```
+
+```json 400 Bad Request - Invalid Color
+{
+  "error": "Color must be valid hex code (e.g., #FF0000)"
+}
+```
+
+```json 400 Bad Request - Invalid Level
+{
+  "error": "Level must be positive"
+}
+```
+</ResponseExample>
+
+---
+
+### Update Alert Severity
+
+<CodeGroup>
+```bash PUT /api/v1/catalog/alert-severities/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/catalog/alert-severities/5" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "notificationDelayMinutes": 0,
+    "description": "Extremely urgent - escalate to manager immediately"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert severity ID to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New severity name (max 20 characters, must be unique)
+</ParamField>
+
+<ParamField body="level" type="short">
+  New numeric level (must be positive)
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+<ParamField body="color" type="string">
+  New hex color code
+</ParamField>
+
+<ParamField body="requiresAction" type="boolean">
+  New action requirement status
+</ParamField>
+
+<ParamField body="notificationDelayMinutes" type="integer">
+  New notification delay (minimum 0)
+</ParamField>
+
+### Response
+
+Same structure as "Create Alert Severity" with updated values.
+
+---
+
+### Delete Alert Severity
+
+<CodeGroup>
+```bash DELETE /api/v1/catalog/alert-severities/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/catalog/alert-severities/5" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Alert severity ID to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 204 No Content
+Alert severity deleted successfully (no body)
+```
+
+```json 404 Not Found
+{
+  "error": "Alert severity not found"
+}
+```
+
+```json 409 Conflict - Associated Alerts Exist
+{
+  "error": "Cannot delete severity 'CRITICAL' because 87 alerts are using it"
+}
+```
+</ResponseExample>
+
+---
+
+## Alert Configuration Workflow
+
+<Steps>
+  <Step title="Define Alert Types">
+    Create custom alert types specific to your greenhouse operations:
+    
+    ```bash
+    POST /api/v1/catalog/alert-types
+    {
+      "name": "NUTRIENT_IMBALANCE",
+      "description": "Nutrient levels are outside optimal range"
+    }
+    ```
+  </Step>
+  
+  <Step title="Configure Severities">
+    Set up severity levels with appropriate notification delays:
+    
+    ```bash
+    POST /api/v1/catalog/alert-severities
+    {
+      "name": "LOW",
+      "level": 1,
+      "color": "#ADD8E6",
+      "requiresAction": false,
+      "notificationDelayMinutes": 120  // Wait 2 hours
+    }
+    ```
+  </Step>
+  
+  <Step title="Create Alerts with Types and Severities">
+    When creating alerts, reference catalog IDs:
+    
+    ```bash
+    POST /api/v1/alerts
+    {
+      "greenhouseId": "550e8400-e29b-41d4-a716-446655440000",
+      "alertTypeId": 1,      // THRESHOLD_EXCEEDED
+      "severityId": 4,       // CRITICAL
+      "message": "Temperature exceeded 35°C",
+      "sensorId": "TEMP_01"
+    }
+    ```
+  </Step>
+  
+  <Step title="Filter Alerts by Severity">
+    Query alerts requiring immediate action:
+    
+    ```bash
+    GET /api/v1/alerts?requiresAction=true&isResolved=false
+    ```
+    
+    Returns only ERROR and CRITICAL unresolved alerts.
+  </Step>
+</Steps>
+
+---
+
+## Notification Delay Explained
+
+<Accordion title="How Notification Delays Work">
+  **Purpose**: Prevent alert fatigue by delaying notifications for less critical issues.
+  
+  **Behavior**:
+  - `notificationDelayMinutes = 0`: Notify immediately
+  - `notificationDelayMinutes > 0`: Wait specified minutes before sending notification
+  - If alert is resolved during delay period, no notification is sent
+  
+  **Use Cases**:
+  
+  | Severity | Delay | Reason |
+  |----------|-------|--------|
+  | **INFO** | 60 min | Batch informational alerts hourly |
+  | **WARNING** | 15 min | Give system time to self-correct |
+  | **ERROR** | 5 min | Brief delay to avoid transient errors |
+  | **CRITICAL** | 0 min | Immediate notification required |
+  
+  **Example Scenario**:
+  ```
+  10:00 AM - Temperature exceeds threshold (WARNING, delay 15 min)
+  10:05 AM - Temperature returns to normal (alert auto-resolved)
+  10:15 AM - No notification sent (alert was resolved during delay)
+  ```
+  
+  **Implementation**:
+  ```javascript
+  // Check if alert should trigger notification
+  const shouldNotify = (alert, severity) => {
+    const alertAge = Date.now() - new Date(alert.createdAt).getTime();
+    const delayMs = severity.notificationDelayMinutes * 60 * 1000;
+    
+    return !alert.isResolved && alertAge >= delayMs;
+  };
+  ```
+</Accordion>
+
+---
+
+## Integration Examples
+
+<CodeGroup>
+```javascript Alert Dashboard Filtering
+// Get critical unresolved alerts for dashboard
+const loadCriticalAlerts = async () => {
+  // Get critical severities
+  const severities = await fetch(
+    'https://api.invernaderos.com/api/v1/catalog/alert-severities/critical',
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  ).then(res => res.json());
+  
+  const criticalSeverityIds = severities.map(s => s.id);
+  
+  // Get unresolved alerts with critical severities
+  const alerts = await fetch(
+    `https://api.invernaderos.com/api/v1/alerts?isResolved=false&severityIds=${criticalSeverityIds.join(',')}`,
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  ).then(res => res.json());
+  
+  return alerts;
+};
+
+// Display alerts with severity colors
+const displayAlerts = async (alerts) => {
+  const severities = await fetch(
+    'https://api.invernaderos.com/api/v1/catalog/alert-severities',
+    { headers: { 'Authorization': `Bearer ${token}` } }
+  ).then(res => res.json());
+  
+  const severityMap = Object.fromEntries(
+    severities.map(s => [s.id, s])
+  );
+  
+  alerts.forEach(alert => {
+    const severity = severityMap[alert.severityId];
+    console.log(
+      `[${severity.name}] ${alert.message}`,
+      `Color: ${severity.color}`,
+      `Requires Action: ${severity.requiresAction}`
+    );
+  });
+};
+```
+
+```python Automated Alert Notification System
+import requests
+import time
+from datetime import datetime, timedelta
+
+class AlertNotifier:
+    def __init__(self, api_url, token):
+        self.api_url = api_url
+        self.token = token
+        self.severity_cache = {}
+    
+    def cache_severities(self):
+        """Cache severity configurations"""
+        response = requests.get(
+            f"{self.api_url}/api/v1/catalog/alert-severities",
+            headers={"Authorization": f"Bearer {self.token}"}
+        )
+        severities = response.json()
+        
+        for severity in severities:
+            self.severity_cache[severity["id"]] = severity
+    
+    def should_notify(self, alert):
+        """Check if alert should trigger notification"""
+        severity = self.severity_cache.get(alert["severityId"])
+        if not severity:
+            return False
+        
+        # Check if alert is resolved
+        if alert["isResolved"]:
+            return False
+        
+        # Check if delay period has passed
+        created_at = datetime.fromisoformat(alert["createdAt"])
+        delay = timedelta(minutes=severity["notificationDelayMinutes"])
+        
+        return datetime.now() >= created_at + delay
+    
+    def process_alerts(self):
+        """Process unresolved alerts and send notifications"""
+        # Get unresolved alerts
+        response = requests.get(
+            f"{self.api_url}/api/v1/alerts?isResolved=false",
+            headers={"Authorization": f"Bearer {self.token}"}
+        )
+        alerts = response.json()
+        
+        for alert in alerts:
+            if self.should_notify(alert):
+                self.send_notification(alert)
+    
+    def send_notification(self, alert):
+        """Send notification via configured channels"""
+        severity = self.severity_cache[alert["severityId"]]
+        
+        notification = {
+            "title": f"[{severity['name']}] {alert['alertType']}",
+            "message": alert["message"],
+            "priority": "high" if severity["requiresAction"] else "normal",
+            "color": severity["color"],
+            "greenhouse": alert["greenhouseId"],
+            "timestamp": alert["createdAt"]
+        }
+        
+        # Send to notification service (email, SMS, push, etc.)
+        print(f"Sending notification: {notification}")
+
+# Usage
+notifier = AlertNotifier("https://api.invernaderos.com", token)
+notifier.cache_severities()
+
+# Run every 5 minutes
+while True:
+    notifier.process_alerts()
+    time.sleep(300)  # 5 minutes
+```
+
+```kotlin Alert UI Components (Android)
+data class AlertUIConfig(
+    val backgroundColor: Int,
+    val textColor: Int,
+    val icon: Int,
+    val requiresAcknowledgment: Boolean
+)
+
+class AlertDisplayManager(private val api: InvernaderosApi) {
+    
+    private val severityCache = mutableMapOf<Short, AlertSeverityResponse>()
+    
+    suspend fun cacheSeverities() {
+        val severities = api.getAlertSeverities()
+        severities.forEach { severity ->
+            severityCache[severity.id] = severity
+        }
+    }
+    
+    fun getAlertUIConfig(severityId: Short): AlertUIConfig {
+        val severity = severityCache[severityId] ?: return defaultConfig()
+        
+        return AlertUIConfig(
+            backgroundColor = parseColor(severity.color),
+            textColor = getContrastColor(severity.color),
+            icon = getIconForSeverity(severity.name),
+            requiresAcknowledgment = severity.requiresAction
+        )
+    }
+    
+    private fun parseColor(hexColor: String?): Int {
+        return try {
+            Color.parseColor(hexColor ?: "#808080")
+        } catch (e: Exception) {
+            Color.GRAY
+        }
+    }
+    
+    private fun getContrastColor(hexColor: String?): Int {
+        // Calculate if white or black text has better contrast
+        val color = parseColor(hexColor)
+        val luminance = (0.299 * Color.red(color) + 
+                        0.587 * Color.green(color) + 
+                        0.114 * Color.blue(color)) / 255
+        
+        return if (luminance > 0.5) Color.BLACK else Color.WHITE
+    }
+    
+    private fun getIconForSeverity(name: String): Int {
+        return when (name) {
+            "INFO" -> R.drawable.ic_info
+            "WARNING" -> R.drawable.ic_warning
+            "ERROR" -> R.drawable.ic_error
+            "CRITICAL" -> R.drawable.ic_critical
+            else -> R.drawable.ic_alert
+        }
+    }
+    
+    private fun defaultConfig() = AlertUIConfig(
+        backgroundColor = Color.GRAY,
+        textColor = Color.WHITE,
+        icon = R.drawable.ic_alert,
+        requiresAcknowledgment = false
+    )
+}
+
+// Usage in AlertViewHolder
+val config = alertManager.getAlertUIConfig(alert.severityId)
+alertView.setBackgroundColor(config.backgroundColor)
+alertText.setTextColor(config.textColor)
+alertIcon.setImageResource(config.icon)
+
+if (config.requiresAcknowledgment) {
+    showAcknowledgeButton()
+}
+```
+</CodeGroup>
+
+---
+
+## Error Codes
+
+| Status Code | Description | Resolution |
+|-------------|-------------|------------|
+| **200 OK** | Request successful | - |
+| **201 Created** | Resource created successfully | - |
+| **204 No Content** | Resource deleted successfully | - |
+| **400 Bad Request** | Invalid input (duplicate name, invalid color, invalid level) | Check error message for details |
+| **404 Not Found** | Resource not found with specified ID | Verify the ID exists |
+| **409 Conflict** | Cannot delete resource due to dependencies (alerts using type/severity) | Delete dependent alerts first |
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Alert Type Naming">
+    Use descriptive, action-oriented names:
+    
+    **Good**:
+    - `THRESHOLD_EXCEEDED`
+    - `SENSOR_OFFLINE`
+    - `NUTRIENT_IMBALANCE`
+    - `MAINTENANCE_REQUIRED`
+    
+    **Bad**:
+    - `ALERT_1`
+    - `PROBLEM`
+    - `ISSUE`
+    - `ERROR_TYPE`
+    
+    **Naming Convention**:
+    - Use UPPER_SNAKE_CASE
+    - Start with subject (SENSOR, ACTUATOR, SYSTEM)
+    - End with action/state (OFFLINE, FAILURE, EXCEEDED)
+  </Accordion>
+  
+  <Accordion title="Severity Level Design">
+    **Standard 4-Level System** (Recommended):
+    1. **INFO** (level 1): Informational, no action needed
+    2. **WARNING** (level 2): Potential issue, review recommended
+    3. **ERROR** (level 3): Issue occurred, action needed soon
+    4. **CRITICAL** (level 4): Urgent issue, immediate action required
+    
+    **Extended 5-Level System** (For complex operations):
+    1. INFO
+    2. LOW
+    3. MEDIUM
+    4. HIGH
+    5. CRITICAL
+    
+    **Key Principles**:
+    - Keep levels consistent across system
+    - Use `requiresAction=true` only for ERROR and above
+    - Set appropriate notification delays (avoid alert fatigue)
+    - Choose colors that are colorblind-friendly
+  </Accordion>
+  
+  <Accordion title="Notification Delay Strategy">
+    **Recommended Delays by Severity**:
+    
+    | Severity | Delay | Rationale |
+    |----------|-------|----------|
+    | INFO | 60-120 min | Batch non-critical updates |
+    | WARNING | 15-30 min | Allow time for auto-recovery |
+    | ERROR | 5 min | Brief delay to filter transients |
+    | CRITICAL | 0 min | Immediate notification |
+    
+    **Considerations**:
+    - Longer delays reduce notification fatigue
+    - Too long delays may miss critical issues
+    - Allow auto-resolution during delay period
+    - Document delay strategy in alert type description
+  </Accordion>
+  
+  <Accordion title="Color Accessibility">
+    **Use colorblind-friendly colors**:
+    
+    | Severity | Color | Hex | Accessible |
+    |----------|-------|-----|------------|
+    | INFO | Blue | `#0066FF` | ✅ Good contrast |
+    | WARNING | Orange | `#FFA500` | ✅ Distinct from red |
+    | ERROR | Dark Orange | `#FF6600` | ✅ Between warning and critical |
+    | CRITICAL | Red | `#FF0000` | ✅ Universal danger signal |
+    
+    **Avoid**:
+    - Pure green/red combinations (deuteranopia)
+    - Low contrast colors (readability)
+    - Similar shades for different severities
+  </Accordion>
+</AccordionGroup>

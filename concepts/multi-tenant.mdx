@@ -1,0 +1,439 @@
+---
+title: 'Multi-Tenant Architecture'
+description: 'UUID-based tenant isolation across MQTT, database, and caching layers'
+icon: 'building'
+---
+
+## Overview
+
+The Invernaderos API implements a **fully isolated multi-tenant architecture** where each tenant (company/farm) has complete data separation across all system layers: MQTT topics, database schemas, and cache keys.
+
+<Note>
+  **Implementation Date**: November 2025 (Migrations V3-V10)
+  
+  The multi-tenant system uses **BIGINT auto-generated IDs** (not UUIDs) with denormalized `tenant_id` fields for optimized queries.
+</Note>
+
+---
+
+## Tenant Identification
+
+### MQTT Topic Structure
+
+Tenants are identified through MQTT topic paths:
+
+<Tabs>
+  <Tab title="Multi-Tenant Format">
+    ```
+    Topic Pattern: GREENHOUSE/{tenantId}
+    
+    Examples:
+    - GREENHOUSE/SARA    → tenant_id for "Vivero Sara" company
+    - GREENHOUSE/001     → tenant_id for generic tenant
+    - GREENHOUSE/NARANJOS → tenant_id for "Los Naranjos" farm
+    ```
+    
+    The `tenantId` is extracted from the topic path and used to isolate all data operations.
+  </Tab>
+  
+  <Tab title="Legacy Format">
+    ```
+    Topic: GREENHOUSE (no tenant suffix)
+    Maps to: tenant_id for "DEFAULT" tenant
+    
+    Use case: Backward compatibility during migration period
+    ```
+    
+    <Warning>
+      The legacy `GREENHOUSE` topic is maintained for backward compatibility only. All new integrations should use the multi-tenant format `GREENHOUSE/{tenantId}`.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### Dynamic Tenant Extraction
+
+The system automatically extracts tenant identifiers from incoming MQTT messages:
+
+```kotlin GreenhouseDataListener.kt
+// Extract tenant/empresaID from topic path
+// Format: "GREENHOUSE/empresaID" → empresaID
+// Legacy: "GREENHOUSE" → "DEFAULT"
+val tenantId = when {
+    topic.startsWith("GREENHOUSE/") -> topic.substringAfter("GREENHOUSE/").takeWhile { it != '/' }
+    topic == "GREENHOUSE" -> "DEFAULT"
+    else -> "UNKNOWN"
+}
+
+logger.info("Processing GREENHOUSE data - Topic: {}, TenantID: {}", topic, tenantId)
+
+// Process the message (save to DB, cache, validate tenant, etc.)
+messageProcessor.processGreenhouseData(payload, tenantId)
+```
+<Caption>Source: `GreenhouseDataListener.kt:65-74`</Caption>
+
+---
+
+## Database Schema Design
+
+### Tenant Registry Table
+
+The `metadata.tenants` table serves as the master tenant registry:
+
+```sql V3__add_tenant_company_fields.sql
+ALTER TABLE metadata.tenants
+  ADD COLUMN IF NOT EXISTS company_name VARCHAR(200),
+  ADD COLUMN IF NOT EXISTS tax_id VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS address TEXT,
+  ADD COLUMN IF NOT EXISTS city VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS postal_code VARCHAR(20),
+  ADD COLUMN IF NOT EXISTS province VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS country VARCHAR(50) DEFAULT 'España',
+  ADD COLUMN IF NOT EXISTS phone VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS contact_person VARCHAR(150),
+  ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS mqtt_topic_prefix VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS coordinates JSONB,
+  ADD COLUMN IF NOT EXISTS notes TEXT;
+
+-- Tax ID must be unique (CIF/NIF)
+ALTER TABLE metadata.tenants 
+  ADD CONSTRAINT uq_tenants_tax_id UNIQUE (tax_id);
+
+-- MQTT topic prefix must be unique (used for routing)
+ALTER TABLE metadata.tenants 
+  ADD CONSTRAINT uq_tenants_mqtt_topic_prefix UNIQUE (mqtt_topic_prefix);
+```
+<Caption>Source: `V3__add_tenant_company_fields.sql:8-22`</Caption>
+
+<Accordion title="Tenant Table Fields Explained">
+  - **company_name**: Business name or client name
+  - **tax_id**: CIF/NIF (Spanish tax ID) - unique constraint
+  - **mqtt_topic_prefix**: MQTT topic routing (e.g., "SARA", "001") - unique constraint
+  - **coordinates**: Geographic location as JSONB `{lat: number, lon: number}`
+  - **contact_person**: Primary contact for the tenant
+  - **notes**: Additional tenant-specific information
+</Accordion>
+
+### Greenhouse Multi-Tenant Fields
+
+Each greenhouse is linked to a specific tenant:
+
+```sql V4__add_greenhouse_mqtt_fields.sql
+ALTER TABLE metadata.greenhouses
+  ADD COLUMN IF NOT EXISTS greenhouse_code VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS mqtt_topic VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS mqtt_publish_interval_seconds INT DEFAULT 5,
+  ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+
+-- Add explicit FK to tenants (CASCADE DELETE)
+ALTER TABLE metadata.greenhouses
+  ADD CONSTRAINT fk_greenhouse_tenant
+  FOREIGN KEY (tenant_id)
+  REFERENCES metadata.tenants(id)
+  ON DELETE CASCADE;
+
+-- greenhouse_code must be unique within a tenant
+ALTER TABLE metadata.greenhouses 
+  ADD CONSTRAINT uq_greenhouse_code_per_tenant 
+  UNIQUE (tenant_id, greenhouse_code);
+
+-- mqtt_topic must be globally unique
+ALTER TABLE metadata.greenhouses 
+  ADD CONSTRAINT uq_greenhouse_mqtt_topic 
+  UNIQUE (mqtt_topic);
+```
+<Caption>Source: `V4__add_greenhouse_mqtt_fields.sql:9-40`</Caption>
+
+### Sensor Multi-Tenant Denormalization
+
+Sensors include a **denormalized `tenant_id`** field for query performance:
+
+```sql V5__add_sensor_mqtt_fields.sql
+ALTER TABLE metadata.sensors
+  ADD COLUMN IF NOT EXISTS sensor_code VARCHAR(50),
+  ADD COLUMN IF NOT EXISTS tenant_id BIGINT,  -- Denormalized for performance
+  ADD COLUMN IF NOT EXISTS mqtt_field_name VARCHAR(100),
+  ADD COLUMN IF NOT EXISTS data_format VARCHAR(20) DEFAULT 'NUMERIC';
+
+-- Populate tenant_id based on greenhouse_id (denormalization)
+UPDATE metadata.sensors s
+SET tenant_id = (
+    SELECT g.tenant_id
+    FROM metadata.greenhouses g
+    WHERE g.id = s.greenhouse_id
+)
+WHERE s.tenant_id IS NULL;
+
+-- Add FK to tenants (for direct queries by tenant)
+ALTER TABLE metadata.sensors
+  ADD CONSTRAINT fk_sensor_tenant
+  FOREIGN KEY (tenant_id)
+  REFERENCES metadata.tenants(id)
+  ON DELETE CASCADE;
+```
+<Caption>Source: `V5__add_sensor_mqtt_fields.sql:9-42`</Caption>
+
+<Note>
+  **Why Denormalization?**
+  
+  The `tenant_id` field is stored directly in the `sensors` table (even though it's derivable from `greenhouses.tenant_id`) to avoid expensive JOINs in multi-tenant queries. This is a performance optimization for time-series queries that filter by tenant.
+</Note>
+
+---
+
+## TimescaleDB Time-Series Isolation
+
+### Sensor Readings Entity
+
+All time-series data includes tenant isolation:
+
+```kotlin SensorReading.kt
+@Entity
+@Table(name = "sensor_readings", schema = "iot")
+@IdClass(SensorReadingId::class)
+data class SensorReading(
+    @Id
+    @Column(nullable = false)
+    val time: Instant,
+
+    @Id
+    @Column(name = "sensor_id", nullable = false, length = 50)
+    val sensorId: String,
+
+    @Column(name = "greenhouse_id", nullable = false)
+    val greenhouseId: Long,  // BIGINT auto-generated ID
+
+    @Column(name = "tenant_id")
+    val tenantId: Long? = null,  // Denormalized tenant ID
+
+    @Column(name = "sensor_type", nullable = false, length = 30)
+    val sensorType: String,
+
+    @Column(nullable = false, columnDefinition = "double precision")
+    val value: Double,
+
+    @Column(length = 20)
+    val unit: String? = null
+)
+```
+<Caption>Source: `SensorReading.kt:30-56`</Caption>
+
+<Warning>
+  **Data Type Change**: The `greenhouse_id` and `tenant_id` fields use **BIGINT** (Kotlin `Long`), not UUIDs. This was changed from the original UUID design for better performance with auto-generated IDs.
+</Warning>
+
+### Multi-Tenant Queries
+
+Repository queries filter by tenant to ensure data isolation:
+
+```kotlin GreenhouseRepository.kt
+@Repository
+interface GreenhouseRepository : JpaRepository<Greenhouse, Long> {
+
+    /**
+     * Find greenhouses by tenant ID.
+     */
+    fun findByTenantId(tenantId: Long): List<Greenhouse>
+
+    /**
+     * Find active greenhouses for a specific tenant.
+     * CRITICAL for multi-tenant validation in MQTT processing.
+     */
+    fun findByTenantIdAndIsActive(tenantId: Long, isActive: Boolean): List<Greenhouse>
+
+    /**
+     * Find greenhouse by name within a tenant.
+     */
+    fun findByTenantIdAndName(tenantId: Long, name: String): Greenhouse?
+
+    /**
+     * Find a greenhouse by ID and tenant ID (double-check tenant isolation).
+     */
+    fun findByIdAndTenantId(id: Long, tenantId: Long): Greenhouse?
+}
+```
+<Caption>Source: `GreenhouseRepository.kt:11-38`</Caption>
+
+### TimescaleDB Tenant Queries
+
+TimescaleDB queries include tenant filtering using native SQL:
+
+```kotlin SensorReadingRepository.kt
+/**
+ * Calculate the trend (trend) of a sensor in a time period.
+ * Uses TimescaleDB FIRST() and LAST() functions.
+ *
+ * Optimized: Avoids loading all data in memory, calculates directly in DB.
+ *
+ * @param sensorId ID of the sensor
+ * @param tenantId ID of the tenant (null to filter only by sensor)
+ * @param startTime Start of period
+ * @param endTime End of period
+ * @return Map with: first_value, last_value, first_time, last_time, unit
+ */
+@Query(value = """
+    SELECT
+        FIRST(value, time) AS first_value,
+        LAST(value, time) AS last_value,
+        FIRST(time, time) AS first_time,
+        LAST(time, time) AS last_time,
+        MAX(unit) AS unit
+    FROM iot.sensor_readings
+    WHERE sensor_id = :sensorId
+      AND (:tenantId IS NULL OR tenant_id = :tenantId)
+      AND time BETWEEN :startTime AND :endTime
+""", nativeQuery = true)
+fun calculateTrend(
+    @Param("sensorId") sensorId: String,
+    @Param("tenantId") tenantId: Long?,  // NULL for cross-tenant queries
+    @Param("startTime") startTime: Instant,
+    @Param("endTime") endTime: Instant
+): Map<String, Any>?
+```
+<Caption>Source: `SensorReadingRepository.kt:122-139`</Caption>
+
+---
+
+## Data Isolation Example
+
+Here's a complete example of how tenant data flows through the system:
+
+<CodeGroup>
+```mqtt MQTT Message
+# Tenant "SARA" publishes sensor data
+Topic: GREENHOUSE/SARA
+Payload: {
+  "TEMPERATURA INVERNADERO 01": 24.5,
+  "HUMEDAD INVERNADERO 01": 62.3
+}
+```
+
+```kotlin Processing
+// 1. Extract tenant from topic
+val tenantId = "SARA"
+
+// 2. Validate tenant exists
+val tenant = tenantRepository.findByMqttTopicPrefix(tenantId)
+  ?: throw UnknownTenantException("Tenant $tenantId not found")
+
+// 3. Find greenhouse for tenant
+val greenhouse = greenhouseRepository.findByTenantIdAndMqttTopic(
+    tenantId = tenant.id,
+    mqttTopic = "GREENHOUSE/SARA"
+) ?: throw GreenhouseNotFoundException()
+
+// 4. Save sensor reading with tenant_id
+val reading = SensorReading(
+    time = Instant.now(),
+    sensorId = "SARA_TEMP01_valor",
+    greenhouseId = greenhouse.id,  // BIGINT
+    tenantId = tenant.id,          // BIGINT (denormalized)
+    sensorType = "TEMPERATURE",
+    value = 24.5,
+    unit = "°C"
+)
+sensorReadingRepository.save(reading)
+```
+
+```sql Query Result
+-- Query only returns data for tenant "SARA"
+SELECT * FROM iot.sensor_readings
+WHERE tenant_id = 1  -- tenant_id for "SARA"
+  AND time >= NOW() - INTERVAL '1 hour'
+ORDER BY time DESC;
+
+-- Result: Only SARA's sensor readings, isolated from other tenants
+```
+</CodeGroup>
+
+---
+
+## Migration Considerations
+
+<Accordion title="Migrating Existing Data to Multi-Tenant">
+  **Step 1: Create DEFAULT Tenant**
+  ```sql
+  INSERT INTO metadata.tenants (name, company_name, mqtt_topic_prefix, is_active)
+  VALUES ('DEFAULT', 'Default Tenant', 'DEFAULT', true);
+  ```
+  
+  **Step 2: Associate Existing Records**
+  ```sql
+  -- Update greenhouses
+  UPDATE metadata.greenhouses 
+  SET tenant_id = (SELECT id FROM metadata.tenants WHERE mqtt_topic_prefix = 'DEFAULT')
+  WHERE tenant_id IS NULL;
+  
+  -- Update sensors (denormalization)
+  UPDATE metadata.sensors s
+  SET tenant_id = (
+      SELECT g.tenant_id
+      FROM metadata.greenhouses g
+      WHERE g.id = s.greenhouse_id
+  )
+  WHERE s.tenant_id IS NULL;
+  
+  -- Update sensor_readings (time-series)
+  UPDATE iot.sensor_readings sr
+  SET tenant_id = (
+      SELECT g.tenant_id
+      FROM metadata.greenhouses g
+      WHERE g.id = sr.greenhouse_id
+  )
+  WHERE sr.tenant_id IS NULL;
+  ```
+  
+  **Step 3: Enable Constraints**
+  ```sql
+  -- Make tenant_id NOT NULL after migration
+  ALTER TABLE metadata.greenhouses ALTER COLUMN tenant_id SET NOT NULL;
+  ALTER TABLE metadata.sensors ALTER COLUMN tenant_id SET NOT NULL;
+  ```
+  
+  <Warning>
+    Run these migrations during a maintenance window. The UPDATE on `iot.sensor_readings` can take several minutes for large datasets (millions of rows).
+  </Warning>
+</Accordion>
+
+<Accordion title="Testing Multi-Tenant Isolation">
+  **Test 1: Verify Topic Routing**
+  ```bash
+  # Publish to tenant SARA
+  mosquitto_pub -t "GREENHOUSE/SARA" -m '{"TEMPERATURA INVERNADERO 01": 25.5}'
+  
+  # Publish to tenant NARANJOS
+  mosquitto_pub -t "GREENHOUSE/NARANJOS" -m '{"TEMPERATURA INVERNADERO 01": 22.0}'
+  
+  # Query database - should see separate tenant_id values
+  SELECT tenant_id, COUNT(*) 
+  FROM iot.sensor_readings 
+  GROUP BY tenant_id;
+  ```
+  
+  **Test 2: Cross-Tenant Query Prevention**
+  ```kotlin
+  // Attempting to access another tenant's data should fail
+  val saraTenant = tenantRepository.findByMqttTopicPrefix("SARA")
+  val naranjosGreenhouse = greenhouseRepository.findByIdAndTenantId(
+      id = naranjosGreenhouseId,
+      tenantId = saraTenant.id  // Wrong tenant!
+  )
+  // Result: null (isolation enforced)
+  ```
+</Accordion>
+
+---
+
+## Best Practices
+
+1. **Always filter by `tenant_id`** in queries to ensure data isolation
+2. **Use denormalized `tenant_id`** in time-series tables for performance
+3. **Validate MQTT topic format** before processing messages
+4. **Log tenant context** in all operations for auditing
+5. **Test cross-tenant isolation** regularly to prevent data leaks
+
+<Note>
+  For more details on MQTT topic configuration, see [MQTT Integration](/concepts/mqtt-integration).
+  
+  For TimescaleDB query optimization, see [Time-Series Data](/concepts/time-series-data).
+</Note>

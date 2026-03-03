@@ -1,0 +1,596 @@
+---
+title: 'TimescaleDB Time-Series Storage'
+description: 'Hypertable configuration, compression policies, and continuous aggregates'
+icon: 'chart-line'
+---
+
+## Overview
+
+The Invernaderos API uses **TimescaleDB** (an extension of PostgreSQL) to store and query time-series sensor data efficiently. TimescaleDB provides automatic partitioning (hypertables), compression, data retention, and continuous aggregates for real-time analytics.
+
+<Note>
+  **TimescaleDB Version**: Compatible with PostgreSQL 16
+  
+  **Schema**: `iot` (not `public`)
+  
+  **Primary Table**: `sensor_readings` (hypertable with 7-day chunks)
+</Note>
+
+---
+
+## Hypertable Setup
+
+### Database Configuration
+
+TimescaleDB is configured as the primary datasource:
+
+```kotlin TimescaleDataSourceConfig.kt
+@Configuration
+@EnableTransactionManagement
+@EnableJpaRepositories(
+    basePackages = ["com.apptolast.invernaderos.features.telemetry.timeseries"],
+    entityManagerFactoryRef = "timescaleEntityManagerFactory",
+    transactionManagerRef = "timescaleTransactionManager"
+)
+class TimescaleDataSourceConfig {
+
+    @Primary
+    @Bean(name = ["timescaleDataSource"])
+    @ConfigurationProperties("spring.datasource.configuration")
+    fun timescaleDataSource(
+        @Qualifier("timescaleDataSourceProperties") properties: DataSourceProperties
+    ): HikariDataSource {
+        return properties
+            .initializeDataSourceBuilder()
+            .type(HikariDataSource::class.java)
+            .build()
+    }
+
+    @Primary
+    @Bean(name = ["timescaleEntityManagerFactory"])
+    fun timescaleEntityManagerFactory(
+        @Qualifier("timescaleDataSource") dataSource: DataSource
+    ): LocalContainerEntityManagerFactoryBean {
+        val entityManager = LocalContainerEntityManagerFactoryBean()
+        entityManager.dataSource = dataSource
+        entityManager.setPackagesToScan(
+            "com.apptolast.invernaderos.features.telemetry.timescaledb.entities"
+        )
+        entityManager.persistenceUnitName = "timescalePersistenceUnit"
+
+        val vendorAdapter = HibernateJpaVendorAdapter()
+        vendorAdapter.setGenerateDdl(false)
+        entityManager.jpaVendorAdapter = vendorAdapter
+
+        val properties = hashMapOf<String, Any>(
+            "hibernate.dialect" to "org.hibernate.dialect.PostgreSQLDialect",
+            "hibernate.hbm2ddl.auto" to "validate",
+            "hibernate.show_sql" to "false",
+            "hibernate.format_sql" to "true"
+        )
+        entityManager.setJpaPropertyMap(properties)
+
+        return entityManager
+    }
+}
+```
+<Caption>Source: `TimescaleDataSourceConfig.kt:20-74`</Caption>
+
+### Sensor Readings Table
+
+The primary entity for time-series data:
+
+```kotlin SensorReading.kt
+/**
+ * Entity for storing sensor readings in TimescaleDB
+ *
+ * Uses a composite primary key (time, sensorId) to allow
+ * multiple readings from different sensors with the same timestamp
+ */
+@Entity
+@Table(name = "sensor_readings", schema = "iot")
+@IdClass(SensorReadingId::class)
+data class SensorReading(
+    @Id
+    @Column(nullable = false)
+    val time: Instant,
+
+    @Id
+    @Column(name = "sensor_id", nullable = false, length = 50)
+    val sensorId: String,
+
+    @Column(name = "greenhouse_id", nullable = false)
+    val greenhouseId: Long,  // BIGINT auto-generated ID
+
+    @Column(name = "tenant_id")
+    val tenantId: Long? = null,  // Denormalized for multi-tenant queries
+
+    @Column(name = "sensor_type", nullable = false, length = 30)
+    val sensorType: String,
+
+    @Column(nullable = false, columnDefinition = "double precision")
+    val value: Double,
+
+    @Column(length = 20)
+    val unit: String? = null
+)
+
+/**
+ * Composite ID class for SensorReading
+ * Required for composite primary key (time, sensorId)
+ */
+data class SensorReadingId(
+    val time: Instant = Instant.now(),
+    val sensorId: String = ""
+) : Serializable
+```
+<Caption>Source: `SensorReading.kt:16-56`</Caption>
+
+<Warning>
+  **Composite Primary Key**: The table uses `(time, sensor_id)` as primary key. This allows multiple sensors to have readings at the exact same timestamp.
+  
+  **Schema Change (Nov 2025)**: The schema changed from `public` to `iot`, and `greenhouse_id` changed from `VARCHAR(50)` to `BIGINT`.
+</Warning>
+
+### Hypertable Creation
+
+TimescaleDB hypertable is created via SQL migration:
+
+```sql Migration
+-- Create iot schema
+CREATE SCHEMA IF NOT EXISTS iot;
+
+-- Create sensor_readings table
+CREATE TABLE iot.sensor_readings (
+    time TIMESTAMPTZ NOT NULL,
+    sensor_id VARCHAR(50) NOT NULL,
+    greenhouse_id BIGINT NOT NULL,
+    tenant_id BIGINT,
+    sensor_type VARCHAR(30) NOT NULL,
+    value DOUBLE PRECISION NOT NULL,
+    unit VARCHAR(20),
+    metadata JSONB,
+    PRIMARY KEY (time, sensor_id)
+);
+
+-- Convert to hypertable with 7-day chunks
+SELECT create_hypertable(
+    'iot.sensor_readings', 
+    'time', 
+    chunk_time_interval => INTERVAL '7 days'
+);
+
+-- Create indexes for common queries
+CREATE INDEX idx_sensor_readings_greenhouse_id 
+    ON iot.sensor_readings(greenhouse_id, time DESC);
+
+CREATE INDEX idx_sensor_readings_tenant_time 
+    ON iot.sensor_readings(tenant_id, time DESC) 
+    WHERE tenant_id IS NOT NULL;
+
+CREATE INDEX idx_sensor_readings_greenhouse_sensor_time 
+    ON iot.sensor_readings(greenhouse_id, sensor_id, time DESC);
+```
+
+<Accordion title="Hypertable Settings Explained">
+  - **chunk_time_interval**: 7 days per chunk (optimal for sensor data)
+  - **Composite PK**: `(time, sensor_id)` allows multiple sensors per timestamp
+  - **Indexes**: Optimized for queries by greenhouse, tenant, and sensor
+  - **TIMESTAMPTZ**: Timezone-aware timestamps (UTC)
+</Accordion>
+
+---
+
+## Compression Policies
+
+### Enable Compression
+
+TimescaleDB compression reduces storage by 90%+ for historical data:
+
+```sql
+-- Enable compression on hypertable
+ALTER TABLE iot.sensor_readings SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = 'sensor_id, greenhouse_id',
+  timescaledb.compress_orderby = 'time DESC'
+);
+
+-- Add compression policy (compress chunks older than 7 days)
+SELECT add_compression_policy(
+    'iot.sensor_readings', 
+    INTERVAL '7 days'
+);
+```
+
+### Compression Strategy
+
+<Tabs>
+  <Tab title="Segmentby">
+    ```sql
+    timescaledb.compress_segmentby = 'sensor_id, greenhouse_id'
+    ```
+    
+    **Purpose**: Groups data by sensor and greenhouse before compression.
+    
+    **Benefit**: Queries filtering by `sensor_id` or `greenhouse_id` can decompress only relevant segments, not the entire chunk.
+    
+    **Trade-off**: More segments = slightly higher overhead, but much faster queries.
+  </Tab>
+  
+  <Tab title="Orderby">
+    ```sql
+    timescaledb.compress_orderby = 'time DESC'
+    ```
+    
+    **Purpose**: Sorts data by time (newest first) before compression.
+    
+    **Benefit**: Range queries (e.g., "last 24 hours") can leverage sorted order for faster decompression.
+    
+    **Use Case**: Most queries retrieve recent data, so descending order optimizes common patterns.
+  </Tab>
+</Tabs>
+
+### Compression Results
+
+Check compression statistics:
+
+```sql
+-- View compression stats per chunk
+SELECT
+    chunk_name,
+    before_compression_total_bytes,
+    after_compression_total_bytes,
+    (before_compression_total_bytes - after_compression_total_bytes) * 100.0 / before_compression_total_bytes AS compression_ratio
+FROM timescaledb_information.compressed_chunk_stats
+ORDER BY chunk_name DESC;
+```
+
+Expected output:
+```
+chunk_name              | before_bytes | after_bytes | compression_ratio
+------------------------+--------------+-------------+------------------
+_hyper_1_10_chunk       | 52428800     | 4194304     | 92.0%
+_hyper_1_9_chunk        | 52428800     | 4718592     | 91.0%
+```
+
+<Note>
+  **Compression Ratio**: Typical compression achieves 90-95% reduction for time-series sensor data with repetitive patterns.
+</Note>
+
+---
+
+## Retention Policies
+
+### Automatic Data Deletion
+
+Automatically delete data older than 2 years:
+
+```sql
+-- Add retention policy (keep 2 years of data)
+SELECT add_retention_policy(
+    'iot.sensor_readings', 
+    INTERVAL '2 years'
+);
+```
+
+### Check Retention Policies
+
+```sql
+SELECT * FROM timescaledb_information.jobs
+WHERE proc_name = 'policy_retention';
+```
+
+Output:
+```
+job_id | hypertable_name    | config
+-------+--------------------+-------------------------
+  1001 | sensor_readings    | {"drop_after": "2 years"}
+```
+
+### Manual Data Cleanup
+
+For one-time cleanup:
+
+```sql
+-- Delete data older than 3 years
+DELETE FROM iot.sensor_readings
+WHERE time < NOW() - INTERVAL '3 years';
+```
+
+---
+
+## Continuous Aggregates
+
+TimescaleDB continuous aggregates are **materialized views** that automatically refresh with new data.
+
+### Hourly Aggregates
+
+Pre-aggregate sensor data by hour:
+
+```sql
+CREATE MATERIALIZED VIEW iot.sensor_readings_hourly
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 hour', time) AS bucket,
+    sensor_id,
+    greenhouse_id,
+    tenant_id,
+    AVG(value) AS avg_value,
+    MIN(value) AS min_value,
+    MAX(value) AS max_value,
+    STDDEV(value) AS stddev_value,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY value) AS percentile_50,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS percentile_95,
+    COUNT(*) AS count
+FROM iot.sensor_readings
+GROUP BY bucket, sensor_id, greenhouse_id, tenant_id;
+
+-- Add refresh policy (refresh every 1 hour)
+SELECT add_continuous_aggregate_policy(
+    'sensor_readings_hourly',
+    start_offset => INTERVAL '3 hours',
+    end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour'
+);
+```
+
+### Daily Aggregates by Tenant
+
+```sql
+CREATE MATERIALIZED VIEW iot.sensor_readings_daily_by_tenant
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 day', time) AS day,
+    tenant_id,
+    COUNT(*) AS total_readings,
+    COUNT(DISTINCT sensor_id) AS unique_sensors,
+    COUNT(DISTINCT greenhouse_id) AS unique_greenhouses,
+    AVG(CASE WHEN sensor_type = 'TEMPERATURE' THEN value END) AS avg_temperature,
+    AVG(CASE WHEN sensor_type = 'HUMIDITY' THEN value END) AS avg_humidity,
+    AVG(CASE WHEN sensor_type = 'SOIL_MOISTURE' THEN value END) AS avg_soil_moisture
+FROM iot.sensor_readings
+WHERE tenant_id IS NOT NULL
+GROUP BY day, tenant_id;
+
+-- Refresh every 6 hours
+SELECT add_continuous_aggregate_policy(
+    'sensor_readings_daily_by_tenant',
+    start_offset => INTERVAL '1 week',
+    end_offset => INTERVAL '1 day',
+    schedule_interval => INTERVAL '6 hours'
+);
+```
+
+### Querying Continuous Aggregates
+
+<CodeGroup>
+```kotlin Kotlin/JPA
+// Entity for hourly aggregates
+@Entity
+@Table(name = "sensor_readings_hourly", schema = "iot")
+data class SensorReadingsHourly(
+    @Id
+    val bucket: Instant,
+    val sensorId: String,
+    val greenhouseId: Long,
+    val tenantId: Long?,
+    val avgValue: Double,
+    val minValue: Double,
+    val maxValue: Double,
+    val count: Long
+)
+
+// Repository query
+@Query("""
+    SELECT h FROM SensorReadingsHourly h
+    WHERE h.greenhouseId = :greenhouseId
+      AND h.bucket BETWEEN :start AND :end
+    ORDER BY h.bucket DESC
+""")
+fun findHourlyAggregates(
+    @Param("greenhouseId") greenhouseId: Long,
+    @Param("start") start: Instant,
+    @Param("end") end: Instant
+): List<SensorReadingsHourly>
+```
+
+```sql Native SQL
+-- Query hourly averages for last 7 days
+SELECT 
+    bucket,
+    sensor_id,
+    avg_value,
+    min_value,
+    max_value
+FROM iot.sensor_readings_hourly
+WHERE greenhouse_id = 1
+  AND tenant_id = 1
+  AND bucket >= NOW() - INTERVAL '7 days'
+ORDER BY bucket DESC;
+```
+
+```sql Performance Comparison
+-- RAW DATA QUERY (slow - scans millions of rows)
+SELECT 
+    time_bucket('1 hour', time) AS hour,
+    AVG(value) AS avg_value
+FROM iot.sensor_readings
+WHERE greenhouse_id = 1
+  AND time >= NOW() - INTERVAL '7 days'
+GROUP BY hour;
+-- Query time: ~1200ms for 7 days
+
+-- CONTINUOUS AGGREGATE QUERY (fast - pre-computed)
+SELECT 
+    bucket AS hour,
+    avg_value
+FROM iot.sensor_readings_hourly
+WHERE greenhouse_id = 1
+  AND bucket >= NOW() - INTERVAL '7 days';
+-- Query time: ~20ms (60x faster!)
+```
+</CodeGroup>
+
+<Note>
+  **Performance Gain**: Continuous aggregates can be 50-100x faster than querying raw data for dashboard analytics.
+</Note>
+
+---
+
+## Query Optimization
+
+### TimescaleDB-Specific Functions
+
+TimescaleDB provides specialized functions for time-series queries:
+
+```kotlin SensorReadingRepository.kt
+/**
+ * Calculate the trend of a sensor using TimescaleDB FIRST() and LAST() functions.
+ * Optimized: Calculates directly in DB, avoids loading all data in memory.
+ */
+@Query(value = """
+    SELECT
+        FIRST(value, time) AS first_value,
+        LAST(value, time) AS last_value,
+        FIRST(time, time) AS first_time,
+        LAST(time, time) AS last_time,
+        MAX(unit) AS unit
+    FROM iot.sensor_readings
+    WHERE sensor_id = :sensorId
+      AND (:tenantId IS NULL OR tenant_id = :tenantId)
+      AND time BETWEEN :startTime AND :endTime
+""", nativeQuery = true)
+fun calculateTrend(
+    @Param("sensorId") sensorId: String,
+    @Param("tenantId") tenantId: Long?,
+    @Param("startTime") startTime: Instant,
+    @Param("endTime") endTime: Instant
+): Map<String, Any>?
+```
+<Caption>Source: `SensorReadingRepository.kt:122-139`</Caption>
+
+<Accordion title="TimescaleDB Functions Reference">
+  - **`time_bucket(interval, timestamp)`**: Buckets timestamps into intervals (e.g., hourly, daily)
+  - **`FIRST(value, time)`**: Returns the first value ordered by time (earliest)
+  - **`LAST(value, time)`**: Returns the last value ordered by time (most recent)
+  - **`approx_percentile(percentile, value)`**: Approximate percentile calculation (faster than exact)
+  - **`histogram(value, min, max, buckets)`**: Creates histogram for value distribution
+</Accordion>
+
+### DISTINCT ON Optimization
+
+Get the latest reading per sensor efficiently:
+
+```kotlin
+@Query(value = """
+    SELECT DISTINCT ON (sensor_id) *
+    FROM iot.sensor_readings
+    WHERE greenhouse_id = :greenhouseId
+    ORDER BY sensor_id, time DESC
+""", nativeQuery = true)
+fun findLatestBySensorForGreenhouse(
+    @Param("greenhouseId") greenhouseId: Long
+): List<SensorReading>
+```
+<Caption>Source: `SensorReadingRepository.kt:100-108`</Caption>
+
+<Note>
+  **PostgreSQL DISTINCT ON**: This is a PostgreSQL-specific feature (not standard SQL). It returns the first row of each group, ordered by the specified columns.
+</Note>
+
+### Batch Inserts
+
+Use batch inserts for high-throughput writes:
+
+```kotlin
+// ❌ BAD: Loop with individual saves (N queries)
+for (reading in readings) {
+    repository.save(reading)  // 1 query per reading
+}
+
+// ✅ GOOD: Batch save (1 query)
+repository.saveAll(readings)  // Single batch INSERT
+```
+
+---
+
+## Data Seeding Example
+
+Realistic sensor data for development:
+
+```sql seed_timescale_dev.sql
+-- SARA_01 - Temperature (TEMP_01) - Realistic diurnal pattern
+INSERT INTO iot.sensor_readings (time, sensor_id, greenhouse_id, tenant_id, sensor_type, value, unit)
+VALUES
+-- Last 60 minutes (12 readings at 5-minute intervals)
+(NOW() - INTERVAL '5 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.5, '°C'),
+(NOW() - INTERVAL '10 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.3, '°C'),
+(NOW() - INTERVAL '15 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.7, '°C'),
+(NOW() - INTERVAL '20 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.4, '°C'),
+(NOW() - INTERVAL '25 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.6, '°C'),
+(NOW() - INTERVAL '30 minutes', 'SARA_TEMP01_valor', 1, 1, 'TEMPERATURE', 24.2, '°C');
+
+-- SARA_01 - Humidity (HUM_01) - Inverse pattern to temperature
+INSERT INTO iot.sensor_readings (time, sensor_id, greenhouse_id, tenant_id, sensor_type, value, unit)
+VALUES
+(NOW() - INTERVAL '5 minutes', 'SARA_HUM01_valor', 1, 1, 'HUMIDITY', 62.3, '%'),
+(NOW() - INTERVAL '10 minutes', 'SARA_HUM01_valor', 1, 1, 'HUMIDITY', 62.8, '%'),
+(NOW() - INTERVAL '15 minutes', 'SARA_HUM01_valor', 1, 1, 'HUMIDITY', 61.9, '%');
+```
+<Caption>Source: `seed_timescale_dev.sql:23-93` (abbreviated)</Caption>
+
+---
+
+## Monitoring & Maintenance
+
+### Check Hypertable Stats
+
+```sql
+SELECT * FROM timescaledb_information.hypertables;
+```
+
+### View Chunk Information
+
+```sql
+SELECT
+    chunk_name,
+    range_start,
+    range_end,
+    is_compressed,
+    chunk_tablespace
+FROM timescaledb_information.chunks
+WHERE hypertable_name = 'sensor_readings'
+ORDER BY range_start DESC
+LIMIT 10;
+```
+
+### Background Jobs
+
+```sql
+-- View all TimescaleDB background jobs
+SELECT 
+    job_id,
+    proc_name,
+    schedule_interval,
+    last_run_status,
+    next_start
+FROM timescaledb_information.jobs;
+```
+
+---
+
+## Best Practices
+
+1. **Use 7-day chunks** for sensor data (balances query performance and storage)
+2. **Enable compression** after 7 days to reduce storage by 90%+
+3. **Create continuous aggregates** for dashboard queries (hourly, daily)
+4. **Use `time_bucket()`** for time-based grouping instead of `DATE_TRUNC()`
+5. **Batch INSERT operations** for high-throughput writes
+6. **Index on `(tenant_id, time)`** for multi-tenant queries
+7. **Monitor chunk count** (too many small chunks = poor performance)
+
+<Note>
+  For multi-tenant data isolation, see [Multi-Tenant Architecture](/concepts/multi-tenant).
+  
+  For real-time data caching, see [MQTT Integration](/concepts/mqtt-integration).
+</Note>

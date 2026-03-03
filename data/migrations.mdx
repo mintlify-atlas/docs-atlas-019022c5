@@ -1,0 +1,1128 @@
+---
+title: Flyway Migrations
+description: Complete database migration history (V15-V31)
+icon: code-branch
+---
+
+# Flyway Database Migrations
+
+Complete documentation of Flyway migrations V15-V31, including staging infrastructure, UUID to BIGINT migration, and catalog table seeding.
+
+## Overview
+
+<Note>
+Migrations are located in `src/main/resources/db/migration/` and executed automatically on application startup via Flyway.
+</Note>
+
+---
+
+## Migration Timeline
+
+<Steps>
+  <Step title="V15-V21: Catalog Tables">
+    Foundation catalog tables (units, device types, actuator states, sectors)
+  </Step>
+  
+  <Step title="V22-V25: UUID to BIGINT">
+    Major refactoring for 40% performance improvement
+  </Step>
+  
+  <Step title="V26-V30: Settings Refinement">
+    Settings table updates and catalog enhancements
+  </Step>
+  
+  <Step title="V31: Initial Data Seeding">
+    Populate catalog tables with production data
+  </Step>
+</Steps>
+
+---
+
+## V11: Staging Infrastructure (581 lines)
+
+**Purpose:** Production-grade bulk import system for million-record datasets
+
+**Date:** November 16, 2025
+
+<Expandable title="Complete staging infrastructure schema">
+
+### Tables Created
+
+#### 1. `staging.sensor_readings_raw`
+
+Receives unvalidated data from bulk imports.
+
+```sql
+CREATE TABLE staging.sensor_readings_raw (
+    id                  BIGSERIAL PRIMARY KEY,
+    batch_id            UUID NOT NULL,
+    
+    -- Sensor reading fields (same as iot.sensor_readings)
+    time                TIMESTAMPTZ NOT NULL,
+    sensor_id           VARCHAR(50) NOT NULL,
+    greenhouse_id       UUID,
+    tenant_id           UUID,
+    sensor_type         VARCHAR(30),
+    value               DOUBLE PRECISION,
+    unit                VARCHAR(20),
+    metadata            JSONB,
+    
+    -- Import metadata
+    import_timestamp    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    validation_status   VARCHAR(20) DEFAULT 'pending',
+    validation_errors   TEXT[],
+    source_system       VARCHAR(100),
+    
+    CONSTRAINT chk_validation_status CHECK (
+        validation_status IN ('pending', 'valid', 'invalid', 'migrated')
+    )
+);
+
+CREATE INDEX idx_staging_raw_batch_id ON staging.sensor_readings_raw(batch_id);
+CREATE INDEX idx_staging_raw_validation_status ON staging.sensor_readings_raw(validation_status);
+```
+
+#### 2. `staging.sensor_readings_validated`
+
+Validated data ready for production migration.
+
+```sql
+CREATE TABLE staging.sensor_readings_validated (
+    id                  BIGSERIAL PRIMARY KEY,
+    raw_reading_id      BIGINT REFERENCES staging.sensor_readings_raw(id),
+    batch_id            UUID NOT NULL,
+    
+    -- Validated fields (strict types)
+    time                TIMESTAMPTZ NOT NULL,
+    sensor_id           VARCHAR(50) NOT NULL,
+    greenhouse_id       UUID NOT NULL,
+    tenant_id           UUID NOT NULL,
+    sensor_type         VARCHAR(30) NOT NULL,
+    value               DOUBLE PRECISION NOT NULL,
+    unit                VARCHAR(20),
+    metadata            JSONB,
+    
+    validated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_staging_validated_batch_id ON staging.sensor_readings_validated(batch_id);
+```
+
+#### 3. `staging.bulk_import_log`
+
+Audit trail for all bulk operations.
+
+```sql
+CREATE TABLE staging.bulk_import_log (
+    batch_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operation_type      VARCHAR(50) NOT NULL,  -- import, validation, migration, rollback
+    
+    -- Timing
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ,
+    duration_seconds    NUMERIC(10,2),
+    
+    -- Status
+    status              VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, completed, failed
+    
+    -- Counts
+    total_records       INT,
+    successful_records  INT,
+    failed_records      INT,
+    
+    -- Details
+    error_summary       TEXT,
+    executed_by         VARCHAR(100),
+    
+    CONSTRAINT chk_operation_type CHECK (
+        operation_type IN ('import', 'validation', 'migration', 'rollback')
+    )
+);
+
+CREATE INDEX idx_bulk_import_log_started_at ON staging.bulk_import_log(started_at DESC);
+```
+
+#### 4. `staging.validation_rules`
+
+Configurable validation rules per sensor type.
+
+```sql
+CREATE TABLE staging.validation_rules (
+    id              SERIAL PRIMARY KEY,
+    sensor_type     VARCHAR(50) NOT NULL UNIQUE,
+    min_value       NUMERIC,
+    max_value       NUMERIC,
+    is_active       BOOLEAN DEFAULT TRUE,
+    description     TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Default validation rules
+INSERT INTO staging.validation_rules (sensor_type, min_value, max_value, description) VALUES
+    ('TEMPERATURE', -50, 100, 'Temperature in Celsius (-50 to 100)'),
+    ('HUMIDITY', 0, 100, 'Relative humidity percentage'),
+    ('SOIL_MOISTURE', 0, 100, 'Soil moisture percentage'),
+    ('LIGHT_INTENSITY', 0, 200000, 'Light intensity in lux'),
+    ('CO2_LEVEL', 0, 5000, 'CO2 concentration in ppm'),
+    ('ATMOSPHERIC_PRESSURE', 800, 1100, 'Pressure in hPa');
+```
+
+### Stored Procedures
+
+#### 1. `proc_validate_sensor_readings(batch_id UUID)`
+
+```sql
+CREATE OR REPLACE FUNCTION staging.proc_validate_sensor_readings(p_batch_id UUID)
+RETURNS JSON AS $$
+DECLARE
+    v_total INT;
+    v_valid INT := 0;
+    v_invalid INT := 0;
+    v_errors TEXT[];
+BEGIN
+    -- Count total records in batch
+    SELECT COUNT(*) INTO v_total 
+    FROM staging.sensor_readings_raw 
+    WHERE batch_id = p_batch_id AND validation_status = 'pending';
+    
+    -- Validate each record
+    WITH validated_records AS (
+        SELECT 
+            r.id,
+            r.time,
+            r.sensor_id,
+            r.greenhouse_id,
+            r.tenant_id,
+            r.sensor_type,
+            r.value,
+            r.unit,
+            r.metadata,
+            CASE
+                -- Check greenhouse_id is valid UUID
+                WHEN r.greenhouse_id IS NULL THEN ARRAY['greenhouse_id is NULL']
+                -- Check tenant_id is valid UUID
+                WHEN r.tenant_id IS NULL THEN ARRAY['tenant_id is NULL']
+                -- Check value is within range for sensor type
+                WHEN EXISTS (
+                    SELECT 1 FROM staging.validation_rules vr
+                    WHERE vr.sensor_type = r.sensor_type
+                      AND vr.is_active = TRUE
+                      AND (r.value < vr.min_value OR r.value > vr.max_value)
+                ) THEN ARRAY['Value ' || r.value || ' out of range for ' || r.sensor_type]
+                -- Check required fields
+                WHEN r.time IS NULL THEN ARRAY['time is NULL']
+                WHEN r.sensor_id IS NULL THEN ARRAY['sensor_id is NULL']
+                WHEN r.value IS NULL THEN ARRAY['value is NULL']
+                ELSE NULL
+            END AS errors
+        FROM staging.sensor_readings_raw r
+        WHERE r.batch_id = p_batch_id AND r.validation_status = 'pending'
+    )
+    -- Insert valid records into validated table
+    INSERT INTO staging.sensor_readings_validated (
+        raw_reading_id, batch_id, time, sensor_id, greenhouse_id, 
+        tenant_id, sensor_type, value, unit, metadata
+    )
+    SELECT 
+        id, p_batch_id, time, sensor_id, greenhouse_id,
+        tenant_id, sensor_type, value, unit, metadata
+    FROM validated_records
+    WHERE errors IS NULL;
+    
+    GET DIAGNOSTICS v_valid = ROW_COUNT;
+    
+    -- Update invalid records
+    UPDATE staging.sensor_readings_raw r
+    SET 
+        validation_status = 'invalid',
+        validation_errors = v.errors
+    FROM validated_records v
+    WHERE r.id = v.id AND v.errors IS NOT NULL;
+    
+    GET DIAGNOSTICS v_invalid = ROW_COUNT;
+    
+    -- Update bulk import log
+    UPDATE staging.bulk_import_log
+    SET 
+        completed_at = NOW(),
+        duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at)),
+        status = CASE WHEN v_invalid = 0 THEN 'completed' ELSE 'partially_completed' END,
+        total_records = v_total,
+        successful_records = v_valid,
+        failed_records = v_invalid
+    WHERE batch_id = p_batch_id;
+    
+    RETURN json_build_object(
+        'total', v_total,
+        'valid', v_valid,
+        'invalid', v_invalid
+    );
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### 2. `proc_migrate_staging_to_production(batch_id UUID, delete_after BOOLEAN)`
+
+```sql
+CREATE OR REPLACE FUNCTION staging.proc_migrate_staging_to_production(
+    p_batch_id UUID,
+    p_delete_after BOOLEAN DEFAULT FALSE
+)
+RETURNS JSON AS $$
+DECLARE
+    v_migrated INT;
+BEGIN
+    -- Bulk insert validated data into production
+    INSERT INTO iot.sensor_readings (
+        time, sensor_id, greenhouse_id, tenant_id, 
+        sensor_type, value, unit, metadata
+    )
+    SELECT 
+        time, sensor_id, greenhouse_id, tenant_id,
+        sensor_type, value, unit, metadata
+    FROM staging.sensor_readings_validated
+    WHERE batch_id = p_batch_id;
+    
+    GET DIAGNOSTICS v_migrated = ROW_COUNT;
+    
+    -- Update validation status
+    UPDATE staging.sensor_readings_validated
+    SET validation_status = 'migrated'
+    WHERE batch_id = p_batch_id;
+    
+    -- Optional cleanup
+    IF p_delete_after THEN
+        DELETE FROM staging.sensor_readings_validated WHERE batch_id = p_batch_id;
+        DELETE FROM staging.sensor_readings_raw WHERE batch_id = p_batch_id;
+    END IF;
+    
+    -- Update bulk import log
+    INSERT INTO staging.bulk_import_log (batch_id, operation_type, status, successful_records)
+    VALUES (p_batch_id, 'migration', 'completed', v_migrated);
+    
+    RETURN json_build_object(
+        'migrated', v_migrated,
+        'status', 'completed'
+    );
+END;
+$$ LANGUAGE plpgsql;
+```
+
+#### 3. `proc_cleanup_staging(days_to_keep INT)`
+
+```sql
+CREATE OR REPLACE FUNCTION staging.proc_cleanup_staging(p_days_to_keep INT DEFAULT 30)
+RETURNS JSON AS $$
+DECLARE
+    v_deleted_raw INT;
+    v_deleted_validated INT;
+BEGIN
+    -- Delete old raw records
+    DELETE FROM staging.sensor_readings_raw
+    WHERE import_timestamp < NOW() - (p_days_to_keep || ' days')::INTERVAL;
+    GET DIAGNOSTICS v_deleted_raw = ROW_COUNT;
+    
+    -- Delete old validated records
+    DELETE FROM staging.sensor_readings_validated
+    WHERE validated_at < NOW() - (p_days_to_keep || ' days')::INTERVAL;
+    GET DIAGNOSTICS v_deleted_validated = ROW_COUNT;
+    
+    RETURN json_build_object(
+        'deleted_raw', v_deleted_raw,
+        'deleted_validated', v_deleted_validated
+    );
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Continuous Aggregates
+
+#### `iot.sensor_readings_hourly`
+
+```sql
+CREATE MATERIALIZED VIEW iot.sensor_readings_hourly
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 hour', time) AS time,
+    greenhouse_id,
+    tenant_id,
+    sensor_type,
+    AVG(value) AS avg_value,
+    MIN(value) AS min_value,
+    MAX(value) AS max_value,
+    STDDEV(value) AS stddev_value,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY value) AS percentile_50,
+    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS percentile_95,
+    COUNT(*) AS count_readings
+FROM iot.sensor_readings
+GROUP BY time_bucket('1 hour', time), greenhouse_id, tenant_id, sensor_type;
+
+-- Refresh policy (every 1 hour)
+SELECT add_continuous_aggregate_policy('iot.sensor_readings_hourly',
+    start_offset => INTERVAL '3 hours',
+    end_offset => INTERVAL '1 hour',
+    schedule_interval => INTERVAL '1 hour');
+```
+
+#### `iot.sensor_readings_daily_by_tenant`
+
+```sql
+CREATE MATERIALIZED VIEW iot.sensor_readings_daily_by_tenant
+WITH (timescaledb.continuous) AS
+SELECT
+    time_bucket('1 day', time) AS day,
+    tenant_id,
+    COUNT(*) AS total_readings,
+    COUNT(DISTINCT greenhouse_id) AS unique_greenhouses,
+    COUNT(DISTINCT sensor_id) AS unique_sensors,
+    AVG(CASE WHEN sensor_type = 'TEMPERATURE' THEN value END) AS avg_temperature,
+    AVG(CASE WHEN sensor_type = 'HUMIDITY' THEN value END) AS avg_humidity
+FROM iot.sensor_readings
+GROUP BY time_bucket('1 day', time), tenant_id;
+
+-- Refresh policy (every 6 hours)
+SELECT add_continuous_aggregate_policy('iot.sensor_readings_daily_by_tenant',
+    start_offset => INTERVAL '1 week',
+    end_offset => INTERVAL '1 day',
+    schedule_interval => INTERVAL '6 hours');
+```
+
+</Expandable>
+
+### Usage Workflow
+
+<CodeGroup>
+
+```sql 1. Import Raw Data
+-- Generate batch ID
+SELECT gen_random_uuid() AS batch_id;
+-- Returns: '550e8400-e29b-41d4-a716-446655440000'
+
+-- Insert raw data from CSV/API
+INSERT INTO staging.sensor_readings_raw (
+    batch_id, time, sensor_id, greenhouse_id, tenant_id, 
+    value, unit, source_system
+)
+VALUES
+    ('550e8400-...', '2025-11-16 10:00:00', 'TEMP_01', 
+     'valid-uuid', 'valid-tenant-uuid', 25.5, '°C', 'csv_import'),
+    -- ... 1 million more records
+```
+
+```sql 2. Validate Data
+-- Run validation
+SELECT * FROM staging.proc_validate_sensor_readings(
+    '550e8400-e29b-41d4-a716-446655440000'
+);
+-- Returns: {"total": 1000000, "valid": 998500, "invalid": 1500}
+
+-- Review validation errors
+SELECT sensor_id, validation_errors
+FROM staging.sensor_readings_raw
+WHERE batch_id = '550e8400-...'
+  AND validation_status = 'invalid';
+```
+
+```sql 3. Migrate to Production
+-- Migrate valid data
+SELECT * FROM staging.proc_migrate_staging_to_production(
+    '550e8400-e29b-41d4-a716-446655440000',
+    FALSE  -- Don't delete staging data yet
+);
+-- Returns: {"migrated": 998500, "status": "completed"}
+
+-- Verify production data
+SELECT COUNT(*) FROM iot.sensor_readings 
+WHERE time >= '2025-11-16 10:00:00';
+```
+
+```sql 4. Review Audit Log
+-- Check bulk import log
+SELECT 
+    batch_id,
+    operation_type,
+    status,
+    total_records,
+    successful_records,
+    failed_records,
+    duration_seconds,
+    started_at,
+    completed_at
+FROM staging.bulk_import_log
+WHERE batch_id = '550e8400-e29b-41d4-a716-446655440000'
+ORDER BY started_at DESC;
+```
+
+</CodeGroup>
+
+---
+
+## V15: Password Reset Fields
+
+**Date:** 2025-12-29
+
+**Purpose:** Add password reset token functionality to users table.
+
+```sql
+ALTER TABLE metadata.users
+    ADD COLUMN IF NOT EXISTS reset_password_token VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS reset_password_token_expiry TIMESTAMPTZ;
+
+COMMENT ON COLUMN metadata.users.reset_password_token 
+    IS 'Token for password reset flow';
+COMMENT ON COLUMN metadata.users.reset_password_token_expiry 
+    IS 'Expiration time for the password reset token';
+```
+
+---
+
+## V16-V21: Catalog Tables
+
+<Accordion title="V16: Units Table (21 measurement units)">
+
+**Date:** 2025-12-29
+
+**Purpose:** Normalized catalog for measurement units.
+
+```sql
+CREATE TABLE metadata.units (
+    id SMALLSERIAL PRIMARY KEY,
+    symbol VARCHAR(10) NOT NULL,
+    name VARCHAR(50) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT uq_units_symbol UNIQUE (symbol)
+);
+
+INSERT INTO metadata.units (symbol, name, description) VALUES
+    ('°C', 'Grados Celsius', 'Temperatura en grados Celsius'),
+    ('°F', 'Grados Fahrenheit', 'Temperatura en grados Fahrenheit'),
+    ('%', 'Porcentaje', 'Porcentaje (humedad, apertura, velocidad)'),
+    ('hPa', 'Hectopascales', 'Presion atmosferica'),
+    ('ppm', 'Partes por millon', 'Concentracion de CO2 u otros gases'),
+    ('lux', 'Lux', 'Intensidad luminica'),
+    -- ... 15 more units
+```
+
+**Units Included:**
+- Temperature: °C, °F
+- Percentage: %
+- Pressure: hPa, bar
+- Gas Concentration: ppm
+- Light: lux, W/m²
+- Speed: m/s, km/h, RPM
+- Flow: L/h, L/min, m³/h
+- Water: mm (precipitation)
+- Power: W, kW
+- Chemistry: pH, mS/cm, dS/m
+- Angle: ° (degrees)
+
+</Accordion>
+
+<Accordion title="V17: Actuator States Table">
+
+**Date:** 2025-12-30
+
+**Purpose:** Catalog of actuator operational states with colors.
+
+```sql
+CREATE TABLE metadata.actuator_states (
+    id SMALLSERIAL PRIMARY KEY,
+    name VARCHAR(30) NOT NULL UNIQUE,
+    description TEXT,
+    is_operational BOOLEAN NOT NULL DEFAULT FALSE,
+    display_order SMALLINT,
+    color VARCHAR(7),  -- Hex color code
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO metadata.actuator_states (name, description, is_operational, color) VALUES
+    ('OFF', 'Apagado', false, '#808080'),
+    ('ON', 'Encendido', true, '#00FF00'),
+    ('AUTO', 'Modo automatico', true, '#0066FF'),
+    ('MANUAL', 'Control manual', true, '#FFA500'),
+    ('ERROR', 'Error operacional', false, '#FF0000'),
+    ('MAINTENANCE', 'En mantenimiento', false, '#FFFF00'),
+    ('STANDBY', 'En espera', false, '#ADD8E6'),
+    ('CALIBRATING', 'Calibrando', false, '#9932CC'),
+    ('OFFLINE', 'Sin conexion', false, '#000000'),
+    ('UNKNOWN', 'Estado desconocido', false, '#C0C0C0');
+```
+
+</Accordion>
+
+<Accordion title="V18: Device Types Table">
+
+**Date:** 2025-12-30
+
+**Purpose:** Catalog of sensor and actuator types with validation ranges.
+
+```sql
+CREATE TABLE metadata.device_types (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    description TEXT,
+    default_unit_id SMALLINT REFERENCES units(id),
+    data_type VARCHAR(20),
+    min_expected_value NUMERIC(10,2),
+    max_expected_value NUMERIC(10,2),
+    control_type VARCHAR(20),  -- BINARY, CONTINUOUS, NULL (sensors)
+    category_id SMALLINT NOT NULL REFERENCES device_categories(id),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO metadata.device_types (name, default_unit_id, data_type, min_expected_value, max_expected_value, category_id) VALUES
+    -- Sensors
+    ('TEMPERATURE', 1, 'DECIMAL', -50.00, 100.00, 1),
+    ('HUMIDITY', 3, 'DECIMAL', 0.00, 100.00, 1),
+    ('SOIL MOISTURE', 3, 'DECIMAL', 0.00, 100.00, 1),
+    ('LIGHT INTENSITY', 6, 'DECIMAL', 0.00, 200000.00, 1),
+    ('CO2 LEVEL', 5, 'DECIMAL', 0.00, 5000.00, 1),
+    -- ... more sensors
+    
+    -- Actuators
+    ('VENTILATOR', 3, 'DECIMAL', NULL, NULL, 2),
+    ('HEATER', 11, 'DECIMAL', NULL, NULL, 2),
+    ('IRRIGATOR', 13, 'DECIMAL', NULL, NULL, 2);
+    -- ... more actuators
+```
+
+**34 Device Types Seeded:**
+- **13 Sensors:** TEMPERATURE, HUMIDITY, SOIL MOISTURE, LIGHT INTENSITY, CO2 LEVEL, ATMOSPHERIC PRESSURE, WIND SPEED, WIND DIRECTION, RAINFALL, SOLAR RADIATION, PH, EC, UV INDEX
+- **21 Actuators:** VENTILATOR, FAN, HEATER, COOLER, IRRIGATOR, LIGHTING, CURTAIN, WINDOW, VALVE, PUMP, EXTRACTOR, MISTING, DEHUMIDIFIER, CO2 INJECTOR, etc.
+
+</Accordion>
+
+<Accordion title="V19: Sectors Table">
+
+**Date:** 2025-12-29
+
+**Purpose:** Greenhouse subdivisions for crop management.
+
+```sql
+CREATE TABLE metadata.sectors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    greenhouse_id UUID NOT NULL REFERENCES greenhouses(id) ON DELETE CASCADE,
+    
+    sector_code VARCHAR(20) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    
+    area_m2 NUMERIC(10,2),
+    location_data JSONB,
+    
+    sector_type VARCHAR(30) CHECK (
+        sector_type IN ('PRODUCTION', 'NURSERY', 'STORAGE', 
+                        'IRRIGATION_ZONE', 'CLIMATE_ZONE', 'OTHER')
+    ),
+    
+    crop_type VARCHAR(100),
+    crop_stage VARCHAR(30) CHECK (
+        crop_stage IN ('SEEDLING', 'VEGETATIVE', 'FLOWERING', 
+                       'FRUITING', 'HARVEST', 'DORMANT')
+    ),
+    
+    target_temperature_min NUMERIC(5,2),
+    target_temperature_max NUMERIC(5,2),
+    target_humidity_min NUMERIC(5,2),
+    target_humidity_max NUMERIC(5,2),
+    
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    CONSTRAINT uq_sector_code_per_greenhouse UNIQUE (greenhouse_id, sector_code)
+);
+```
+
+</Accordion>
+
+---
+
+## V22-V25: UUID to BIGINT Migration
+
+<Warning>
+**Major Performance Refactoring** - This migration took ~4 hours to develop and execute safely.
+</Warning>
+
+### V22: Migrate UUID to BIGINT (780 lines)
+
+**Date:** 2026-01-08
+
+**Purpose:** Migrate all UUID primary keys to BIGINT for 40% performance improvement.
+
+**Impact:**
+- Index size reduced by 50%
+- JOIN queries 40% faster
+- Auto-increment IDs instead of UUID generation overhead
+
+**Tables Migrated:**
+1. tenants (root)
+2. users
+3. greenhouses
+4. sectors
+5. devices
+6. alerts
+7. settings
+8. command_history
+
+<Expandable title="Migration strategy (preserves all data)">
+
+### Phase 1: Create Mapping Tables
+
+```sql
+CREATE TABLE metadata.uuid_mapping_tenants (
+    old_uuid UUID PRIMARY KEY,
+    new_id BIGINT NOT NULL
+);
+-- ... repeat for all 8 tables
+```
+
+### Phase 2: Create Sequences
+
+```sql
+CREATE SEQUENCE metadata.tenants_id_seq AS BIGINT 
+    START WITH 1 INCREMENT BY 1;
+-- ... repeat for all 8 tables
+```
+
+### Phase 3: Add New Columns
+
+```sql
+ALTER TABLE metadata.tenants ADD COLUMN new_id BIGINT;
+
+INSERT INTO metadata.uuid_mapping_tenants (old_uuid, new_id)
+SELECT id, nextval('metadata.tenants_id_seq')
+FROM metadata.tenants;
+
+UPDATE metadata.tenants t
+SET new_id = m.new_id
+FROM metadata.uuid_mapping_tenants m
+WHERE t.id = m.old_uuid;
+```
+
+### Phase 4: Drop Old Constraints
+
+```sql
+ALTER TABLE metadata.tenants DROP CONSTRAINT tenants_pkey CASCADE;
+-- ... drop all FKs and indexes
+```
+
+### Phase 5: Drop Old Columns
+
+```sql
+ALTER TABLE metadata.tenants DROP COLUMN id;
+ALTER TABLE metadata.users DROP COLUMN tenant_id;
+-- ... drop all UUID columns
+```
+
+### Phase 6: Rename New Columns
+
+```sql
+ALTER TABLE metadata.tenants RENAME COLUMN new_id TO id;
+ALTER TABLE metadata.users RENAME COLUMN new_tenant_id TO tenant_id;
+```
+
+### Phase 7: Set Defaults
+
+```sql
+ALTER TABLE metadata.tenants 
+    ALTER COLUMN id SET DEFAULT nextval('metadata.tenants_id_seq');
+
+ALTER SEQUENCE metadata.tenants_id_seq OWNED BY metadata.tenants.id;
+```
+
+### Phase 8: Recreate Constraints
+
+```sql
+ALTER TABLE metadata.tenants ADD PRIMARY KEY (id);
+
+ALTER TABLE metadata.users
+    ADD CONSTRAINT fk_users_tenant
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+```
+
+### Phase 9: Verify
+
+```sql
+DO $$
+DECLARE
+    v_tenants_id_type TEXT;
+BEGIN
+    SELECT data_type INTO v_tenants_id_type
+    FROM information_schema.columns
+    WHERE table_name = 'tenants' AND column_name = 'id';
+    
+    IF v_tenants_id_type != 'bigint' THEN
+        RAISE EXCEPTION 'Migration failed: id is %, not bigint', v_tenants_id_type;
+    END IF;
+    
+    RAISE NOTICE 'Migration successful: all IDs are BIGINT';
+END $$;
+```
+
+</Expandable>
+
+### V23: Cleanup UUID Migration (21,369 lines)
+
+**Date:** 2026-01-09
+
+**Purpose:** Remove temporary mapping tables after verification.
+
+```sql
+DROP TABLE IF EXISTS metadata.uuid_mapping_tenants;
+DROP TABLE IF EXISTS metadata.uuid_mapping_users;
+DROP TABLE IF EXISTS metadata.uuid_mapping_greenhouses;
+-- ... drop all 8 mapping tables
+```
+
+### V24: Add TSID and Codes (19,724 lines)
+
+**Date:** 2026-01-10
+
+**Purpose:** Add Time-Sorted ID (TSID) support and unique codes.
+
+```sql
+ALTER TABLE metadata.devices ADD COLUMN tsid BIGINT;
+ALTER TABLE metadata.devices ADD COLUMN device_code VARCHAR(50) UNIQUE;
+```
+
+### V25: Migrate Existing IDs to TSID (15,977 lines)
+
+**Date:** 2026-01-11
+
+**Purpose:** Backfill TSID for existing records.
+
+```sql
+UPDATE metadata.devices
+SET tsid = id,  -- Use BIGINT id as TSID
+    device_code = 'DEVICE_' || LPAD(id::TEXT, 8, '0')
+WHERE tsid IS NULL;
+```
+
+---
+
+## V26-V30: Settings and Catalog Refinements
+
+<AccordionGroup>
+  <Accordion title="V26: Settings Replace Period with Actuator State">
+    **Date:** 2026-01-12
+    
+    **Purpose:** Link settings to actuator states instead of periods.
+    
+    ```sql
+    ALTER TABLE metadata.settings DROP COLUMN period_id;
+    ALTER TABLE metadata.settings ADD COLUMN actuator_state_id SMALLINT 
+        REFERENCES actuator_states(id);
+    ```
+  </Accordion>
+  
+  <Accordion title="V27: Create Data Types Table">
+    **Date:** 2026-01-15
+    
+    **Purpose:** Catalog for data type validation.
+    
+    ```sql
+    CREATE TABLE metadata.data_types (
+        id SMALLSERIAL PRIMARY KEY,
+        name VARCHAR(30) NOT NULL UNIQUE,
+        description TEXT,
+        validation_regex VARCHAR(255),
+        example_value VARCHAR(100),
+        display_order SMALLINT,
+        is_active BOOLEAN DEFAULT TRUE
+    );
+    
+    INSERT INTO metadata.data_types (name, validation_regex, example_value) VALUES
+        ('INTEGER', '^-?\d+$', '25'),
+        ('LONG', '^-?\d+$', '9223372036854775807'),
+        ('DOUBLE', '^-?\d+(\.\d+)?$', '25.5'),
+        ('BOOLEAN', '^(true|false|TRUE|FALSE|1|0)$', 'true'),
+        ('STRING', '.*', 'Invernadero Norte'),
+        ('DATE', '^\d{4}-\d{2}-\d{2}$', '2026-01-15'),
+        ('TIME', '^\d{2}:\d{2}(:\d{2})?$', '14:30:00'),
+        ('DATETIME', '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', '2026-01-15T14:30:00'),
+        ('JSON', '^\{.*\}$|^\[.*\]$', '{"key": "value"}');
+    ```
+  </Accordion>
+  
+  <Accordion title="V28: Change Greenhouse to Sector in Alerts/Settings">
+    **Date:** 2026-01-18
+    
+    **Purpose:** Alerts and settings now reference sectors instead of greenhouses.
+    
+    ```sql
+    ALTER TABLE metadata.alerts DROP COLUMN greenhouse_id;
+    ALTER TABLE metadata.alerts ADD COLUMN sector_id BIGINT 
+        REFERENCES sectors(id) ON DELETE CASCADE;
+    
+    ALTER TABLE metadata.settings DROP COLUMN greenhouse_id;
+    ALTER TABLE metadata.settings ADD COLUMN sector_id BIGINT 
+        REFERENCES sectors(id) ON DELETE CASCADE;
+    ```
+  </Accordion>
+  
+  <Accordion title="V29: Add Description Fields and Nullable Message">
+    **Date:** 2026-01-20
+    
+    **Purpose:** Add description fields to multiple tables.
+    
+    ```sql
+    ALTER TABLE metadata.devices ADD COLUMN description TEXT;
+    ALTER TABLE metadata.alerts ALTER COLUMN message DROP NOT NULL;
+    ```
+  </Accordion>
+  
+  <Accordion title="V30: Rename Sectors Variety to Name">
+    **Date:** 2026-01-22
+    
+    **Purpose:** Rename `variety` column to `name` in sectors table.
+    
+    ```sql
+    ALTER TABLE metadata.sectors RENAME COLUMN variety TO name;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## V31: Seed All Initial Data (148 lines)
+
+**Date:** 2026-02-23
+
+**Purpose:** Populate catalog tables with production data.
+
+<Expandable title="Complete seed data">
+
+### Actuator States (10 states)
+
+```sql
+INSERT INTO metadata.actuator_states (id, name, description, is_operational, color) VALUES
+    (1, 'OFF', 'Apagado', false, '#808080'),
+    (2, 'ON', 'Encendido', true, '#00FF00'),
+    (3, 'AUTO', 'Modo automatico', true, '#0066FF'),
+    (4, 'MANUAL', 'Control manual', true, '#FFA500'),
+    (5, 'ERROR', 'Error operacional', false, '#FF0000'),
+    (6, 'MAINTENANCE', 'En mantenimiento', false, '#FFFF00'),
+    (7, 'STANDBY', 'En espera', false, '#ADD8E6'),
+    (8, 'CALIBRATING', 'Calibrando', false, '#9932CC'),
+    (9, 'OFFLINE', 'Sin conexion', false, '#000000'),
+    (10, 'UNKNOWN', 'Estado desconocido', false, '#C0C0C0')
+ON CONFLICT DO NOTHING;
+```
+
+### Alert Types (6 types)
+
+```sql
+INSERT INTO metadata.alert_types (id, name) VALUES
+    (1, 'THRESHOLD EXCEEDED'),
+    (2, 'SENSOR OFFLINE'),
+    (3, 'ACTUATOR FAILURE'),
+    (4, 'SYSTEM ERROR'),
+    (5, 'WARNING'),
+    (6, 'INFO')
+ON CONFLICT DO NOTHING;
+```
+
+### Alert Severities (4 levels)
+
+```sql
+INSERT INTO metadata.alert_severities (id, name, level, color) VALUES
+    (1, 'INFO', 1, '#0066FF'),
+    (2, 'WARNING', 2, '#FFA500'),
+    (3, 'ERROR', 3, '#FF7722'),
+    (4, 'CRITICAL', 4, '#FF0000')
+ON CONFLICT DO NOTHING;
+```
+
+### Data Types (9 types)
+
+```sql
+INSERT INTO metadata.data_types (id, name, validation_regex, example_value) VALUES
+    (1, 'INTEGER', '^-?\d+$', '25'),
+    (2, 'LONG', '^-?\d+$', '9223372036854775807'),
+    (3, 'DOUBLE', '^-?\d+(\.\d+)?$', '25.5'),
+    (4, 'BOOLEAN', '^(true|false|TRUE|FALSE|1|0)$', 'true'),
+    (5, 'STRING', '.*', 'Invernadero Norte'),
+    (6, 'DATE', '^\d{4}-\d{2}-\d{2}$', '2026-01-15'),
+    (7, 'TIME', '^\d{2}:\d{2}(:\d{2})?$', '14:30:00'),
+    (8, 'DATETIME', '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', '2026-01-15T14:30:00'),
+    (9, 'JSON', '^\{.*\}$|^\[.*\]$', '{"key": "value"}')
+ON CONFLICT DO NOTHING;
+```
+
+### Device Categories (2 categories)
+
+```sql
+INSERT INTO metadata.device_categories (id, name) VALUES
+    (1, 'SENSOR'),
+    (2, 'ACTUATOR')
+ON CONFLICT DO NOTHING;
+```
+
+### Units (21 units)
+
+```sql
+INSERT INTO metadata.units (id, symbol, name, description) VALUES
+    (1, '°C', 'Grados Celsius', 'Temperatura en grados Celsius'),
+    (3, '%', 'Porcentaje', 'Porcentaje (humedad, apertura, velocidad)'),
+    (4, 'hPa', 'Hectopascales', 'Presion atmosferica'),
+    (5, 'ppm', 'Partes por millon', 'Concentracion de CO2 u otros gases'),
+    (6, 'lux', 'lx', 'Intensidad luminica'),
+    -- ... 16 more units
+ON CONFLICT DO NOTHING;
+```
+
+### Periods (3 periods)
+
+```sql
+INSERT INTO metadata.periods (id, name) VALUES
+    (1, 'DAY'),
+    (2, 'NIGHT'),
+    (3, 'ALL')
+ON CONFLICT DO NOTHING;
+```
+
+### Device Types (34 types)
+
+```sql
+INSERT INTO metadata.device_types (id, name, default_unit_id, data_type, min_expected_value, max_expected_value, category_id) VALUES
+    -- Sensors (13 types)
+    (1, 'TEMPERATURE', 1, 'DECIMAL', -50.00, 100.00, 1),
+    (2, 'HUMIDITY', 3, 'DECIMAL', 0.00, 100.00, 1),
+    (3, 'SOIL MOISTURE', 3, 'DECIMAL', 0.00, 100.00, 1),
+    -- ... 10 more sensor types
+    
+    -- Actuators (21 types)
+    (14, 'VENTILATOR', 3, 'DECIMAL', NULL, NULL, 2),
+    (15, 'FAN', 3, 'DECIMAL', NULL, NULL, 2),
+    (16, 'HEATER', 11, 'DECIMAL', NULL, NULL, 2)
+    -- ... 18 more actuator types
+ON CONFLICT DO NOTHING;
+```
+
+### MQTT System Accounts (2 accounts)
+
+```sql
+INSERT INTO metadata.mqtt_users (id, username, password_hash, salt, device_type) VALUES
+    ('11cd0457-...', 'admin', 'b5ecf4e693f7b046e54badcd91040bfeeb74cd49947fba78a863e4577fb5f250', 'apptolast', 'API'),
+    ('8bb9f453-...', 'api_spring_boot', 'f12ee30aa778b68f51438466fd13ee34a6ec35fc4dfc7d965f766dd78329da53', 'apptolast', 'API')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO metadata.mqtt_acl (id, username, permission, action, topic, qos) VALUES
+    ('f239ad78-...', 'admin', 'allow', 'pubsub', '#', 2),
+    ('1f74ee21-...', 'api_spring_boot', 'allow', 'publish', '#', 2),
+    ('acf98402-...', 'api_spring_boot', 'allow', 'subscribe', '#', 2)
+ON CONFLICT DO NOTHING;
+```
+
+### Reset Sequences
+
+```sql
+SELECT setval('metadata.actuator_states_id_seq', (SELECT COALESCE(MAX(id), 1) FROM metadata.actuator_states), true);
+SELECT setval('metadata.alert_severities_id_seq', (SELECT COALESCE(MAX(id), 1) FROM metadata.alert_severities), true);
+SELECT setval('metadata.alert_types_id_seq', (SELECT COALESCE(MAX(id), 1) FROM metadata.alert_types), true);
+-- ... reset all 8 catalog sequences
+```
+
+</Expandable>
+
+---
+
+## Migration Best Practices
+
+### Running Migrations
+
+<Note>
+Flyway automatically executes migrations on application startup. Manual execution is rarely needed.
+</Note>
+
+```bash
+# Migrations run automatically on startup
+./gradlew bootRun
+
+# Or in Docker
+docker-compose up -d api
+
+# Check migration status
+./gradlew flywayInfo
+
+# Validate checksums
+./gradlew flywayValidate
+```
+
+### Migration Safety
+
+<Warning>
+**Never modify executed migrations!** Changing a migration file after execution will cause checksum mismatch and prevent startup.
+</Warning>
+
+<CardGroup cols={2}>
+  <Card title="✅ Safe Operations" icon="check">
+    - Add new columns (nullable)
+    - Create new tables
+    - Add indexes
+    - Insert seed data with `ON CONFLICT DO NOTHING`
+  </Card>
+  
+  <Card title="❌ Dangerous Operations" icon="xmark">
+    - Drop columns with data
+    - Change column types (may fail)
+    - Drop tables (data loss)
+    - Modify existing seed data
+  </Card>
+</CardGroup>
+
+### Rollback Strategy
+
+<Steps>
+  <Step title="Database Backup">
+    Always backup before running migrations in production
+    
+    ```bash
+    pg_dump -U admin -d postgres > backup_$(date +%Y%m%d).sql
+    ```
+  </Step>
+  
+  <Step title="Test in Staging">
+    Run migrations in staging environment first
+  </Step>
+  
+  <Step title="Monitor Logs">
+    Watch Flyway output for errors
+    
+    ```bash
+    kubectl logs -f deployment/invernaderos-api-prod | grep Flyway
+    ```
+  </Step>
+  
+  <Step title="Rollback if Needed">
+    Restore from backup if migration fails
+    
+    ```bash
+    psql -U admin -d postgres < backup_20260223.sql
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Related Documentation
+
+<CardGroup cols={3}>
+  <Card title="Database Architecture" icon="database" href="/data/databases">
+    Dual database strategy overview
+  </Card>
+  
+  <Card title="Caching Strategy" icon="bolt" href="/data/caching-strategy">
+    Redis implementation details
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    REST endpoints for data access
+  </Card>
+</CardGroup>

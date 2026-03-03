@@ -1,0 +1,625 @@
+---
+title: "Data Types Catalog"
+description: "Manage data type definitions for configuration values"
+---
+
+## Overview
+
+The Data Types catalog defines how to interpret and validate configuration values in the Invernaderos system. Each data type specifies validation rules, regex patterns, and display properties for settings configuration.
+
+**Supported Types**: INTEGER, LONG, DOUBLE, BOOLEAN, STRING, DATE, TIME, DATETIME, JSON
+
+---
+
+## Get All Data Types
+
+<CodeGroup>
+```bash GET /api/v1/catalog/data-types
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/data-types" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves all data types ordered by display order.
+
+### Response
+
+<ResponseField name="data" type="array">
+  Array of data type objects
+  
+  <Expandable title="DataTypeResponse">
+    <ResponseField name="id" type="short" required>
+      Unique identifier
+    </ResponseField>
+    
+    <ResponseField name="name" type="string" required>
+      Type name (e.g., "INTEGER", "BOOLEAN", "STRING")
+    </ResponseField>
+    
+    <ResponseField name="description" type="string">
+      Description of the data type
+    </ResponseField>
+    
+    <ResponseField name="validationRegex" type="string">
+      Regular expression for value validation
+    </ResponseField>
+    
+    <ResponseField name="exampleValue" type="string">
+      Example of a valid value
+    </ResponseField>
+    
+    <ResponseField name="displayOrder" type="short" required>
+      Sort order for UI display
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean" required>
+      Whether the data type is active
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseExample>
+```json 200 OK
+[
+  {
+    "id": 1,
+    "name": "INTEGER",
+    "description": "Whole number (32-bit)",
+    "validationRegex": "^-?\\d+$",
+    "exampleValue": "25",
+    "displayOrder": 1,
+    "isActive": true
+  },
+  {
+    "id": 2,
+    "name": "DOUBLE",
+    "description": "Decimal number (64-bit)",
+    "validationRegex": "^-?\\d+(\\.\\d+)?$",
+    "exampleValue": "25.5",
+    "displayOrder": 2,
+    "isActive": true
+  },
+  {
+    "id": 3,
+    "name": "BOOLEAN",
+    "description": "True/false value",
+    "validationRegex": "^(true|false|1|0)$",
+    "exampleValue": "true",
+    "displayOrder": 3,
+    "isActive": true
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Active Data Types
+
+<CodeGroup>
+```bash GET /api/v1/catalog/data-types/active
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/data-types/active" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Retrieves only active data types (where `isActive = true`).
+
+### Response
+
+Same structure as "Get All Data Types", but filtered to active types only.
+
+---
+
+## Get Data Type by ID
+
+<CodeGroup>
+```bash GET /api/v1/catalog/data-types/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/data-types/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Data type ID
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 1,
+  "name": "INTEGER",
+  "description": "Whole number (32-bit)",
+  "validationRegex": "^-?\\d+$",
+  "exampleValue": "25",
+  "displayOrder": 1,
+  "isActive": true
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Data type not found"
+}
+```
+</ResponseExample>
+
+---
+
+## Get Data Type by Name
+
+<CodeGroup>
+```bash GET /api/v1/catalog/data-types/name/{name}
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/data-types/name/INTEGER" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="name" type="string" required>
+  Data type name (case-insensitive, e.g., "INTEGER", "BOOLEAN")
+</ParamField>
+
+### Response
+
+Same structure as "Get Data Type by ID".
+
+---
+
+## Validate Value
+
+<CodeGroup>
+```bash GET /api/v1/catalog/data-types/{id}/validate
+curl -X GET "https://api.invernaderos.com/api/v1/catalog/data-types/1/validate?value=25" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+Validates whether a value is valid for a specific data type.
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Data type ID
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="value" type="string" required>
+  Value to validate
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK - Valid
+{
+  "dataTypeId": 1,
+  "value": "25",
+  "isValid": true
+}
+```
+
+```json 200 OK - Invalid
+{
+  "dataTypeId": 1,
+  "value": "not-a-number",
+  "isValid": false
+}
+```
+</ResponseExample>
+
+### Validation Rules
+
+<Accordion title="Built-in Validation Rules">
+  | Data Type | Validation Logic | Examples |
+  |-----------|------------------|----------|
+  | **INTEGER** | Must parse as 32-bit integer | `25`, `-100`, `0` |
+  | **LONG** | Must parse as 64-bit integer | `1234567890`, `-999` |
+  | **DOUBLE** | Must parse as decimal number | `25.5`, `-10.75`, `0.0` |
+  | **BOOLEAN** | Must be "true", "false", "1", or "0" | `true`, `false`, `1`, `0` |
+  | **STRING** | Any string is valid | `"hello"`, `"123"`, `""` |
+  | **DATE** | Must parse as ISO-8601 date | `2025-03-15` |
+  | **TIME** | Must parse as ISO-8601 time | `14:30:00`, `09:15:30` |
+  | **DATETIME** | Must parse as ISO-8601 datetime | `2025-03-15T14:30:00` |
+  | **JSON** | Must start with `{` or `[` and end with `}` or `]` | `{"key": "value"}`, `[1, 2, 3]` |
+  | **Custom** | Uses `validationRegex` if defined | Regex pattern dependent |
+</Accordion>
+
+---
+
+## Create Data Type
+
+<CodeGroup>
+```bash POST /api/v1/catalog/data-types
+curl -X POST "https://api.invernaderos.com/api/v1/catalog/data-types" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "PERCENTAGE",
+    "description": "Value between 0-100",
+    "validationRegex": "^(100|[1-9]?[0-9])$",
+    "exampleValue": "75",
+    "displayOrder": 10,
+    "isActive": true
+  }'
+```
+</CodeGroup>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Type name (max 20 characters, will be converted to uppercase, must be unique)
+</ParamField>
+
+<ParamField body="description" type="string">
+  Description of the data type
+</ParamField>
+
+<ParamField body="validationRegex" type="string">
+  Regular expression for value validation (must be valid regex)
+</ParamField>
+
+<ParamField body="exampleValue" type="string">
+  Example of a valid value
+</ParamField>
+
+<ParamField body="displayOrder" type="short" default="0">
+  Sort order for UI display (minimum 0)
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the data type is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 Created
+{
+  "id": 10,
+  "name": "PERCENTAGE",
+  "description": "Value between 0-100",
+  "validationRegex": "^(100|[1-9]?[0-9])$",
+  "exampleValue": "75",
+  "displayOrder": 10,
+  "isActive": true
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Data type with name 'PERCENTAGE' already exists"
+}
+```
+
+```json 400 Bad Request - Invalid Regex
+{
+  "error": "Validation regex is invalid: [unclosed bracket"
+}
+```
+</ResponseExample>
+
+---
+
+## Update Data Type
+
+<CodeGroup>
+```bash PUT /api/v1/catalog/data-types/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/catalog/data-types/10" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Value between 0-100 with decimals",
+    "validationRegex": "^(100|[1-9]?[0-9])(\\.[0-9]+)?$",
+    "exampleValue": "75.5"
+  }'
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Data type ID to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  New type name (max 20 characters, will be converted to uppercase)
+</ParamField>
+
+<ParamField body="description" type="string">
+  New description
+</ParamField>
+
+<ParamField body="validationRegex" type="string">
+  New validation regex (must be valid)
+</ParamField>
+
+<ParamField body="exampleValue" type="string">
+  New example value
+</ParamField>
+
+<ParamField body="displayOrder" type="short">
+  New display order (minimum 0)
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  New active status
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 OK
+{
+  "id": 10,
+  "name": "PERCENTAGE",
+  "description": "Value between 0-100 with decimals",
+  "validationRegex": "^(100|[1-9]?[0-9])(\\.[0-9]+)?$",
+  "exampleValue": "75.5",
+  "displayOrder": 10,
+  "isActive": true
+}
+```
+
+```json 404 Not Found
+{
+  "error": "Data type not found"
+}
+```
+
+```json 400 Bad Request - Duplicate Name
+{
+  "error": "Another data type with name 'INTEGER' already exists"
+}
+```
+</ResponseExample>
+
+---
+
+## Delete Data Type
+
+<CodeGroup>
+```bash DELETE /api/v1/catalog/data-types/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/catalog/data-types/10" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</CodeGroup>
+
+### Path Parameters
+
+<ParamField path="id" type="short" required>
+  Data type ID to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 204 No Content
+Data type deleted successfully (no body)
+```
+
+```json 404 Not Found
+{
+  "error": "Data type not found"
+}
+```
+
+```json 409 Conflict - System Type
+{
+  "error": "Cannot delete system data type 'INTEGER' (IDs 1-9 are protected)"
+}
+```
+</ResponseExample>
+
+<Warning>
+  **System Data Types (IDs 1-9) Cannot Be Deleted**
+  
+  The first 9 data types are core system types and are protected from deletion:
+  - INTEGER, LONG, DOUBLE, BOOLEAN, STRING, DATE, TIME, DATETIME, JSON
+  
+  Attempting to delete these will result in a 409 Conflict error.
+</Warning>
+
+---
+
+## Active/Inactive Filtering
+
+Data types can be marked as inactive without deletion. This allows you to:
+
+- **Soft delete** deprecated types without losing historical data
+- **Hide** unused types from UI dropdowns
+- **Preserve** validation rules for existing configurations
+
+### Use Cases
+
+<Tabs>
+  <Tab title="Filter Active Only">
+    ```bash
+    GET /api/v1/catalog/data-types/active
+    ```
+    Returns only types where `isActive = true`.
+    
+    **Use this for**: Populating dropdowns in configuration UIs.
+  </Tab>
+  
+  <Tab title="Get All Types">
+    ```bash
+    GET /api/v1/catalog/data-types
+    ```
+    Returns all types regardless of active status.
+    
+    **Use this for**: Admin interfaces, historical data analysis.
+  </Tab>
+  
+  <Tab title="Deactivate Type">
+    ```bash
+    PUT /api/v1/catalog/data-types/{id}
+    {
+      "isActive": false
+    }
+    ```
+    Soft deletes the type without removing validation rules.
+  </Tab>
+</Tabs>
+
+---
+
+## Integration Examples
+
+<CodeGroup>
+```javascript Validate Configuration Value
+// Validate a setting value before saving
+const validateSetting = async (dataTypeId, value) => {
+  const response = await fetch(
+    `https://api.invernaderos.com/api/v1/catalog/data-types/${dataTypeId}/validate?value=${encodeURIComponent(value)}`,
+    {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }
+  );
+  
+  const result = await response.json();
+  
+  if (!result.isValid) {
+    throw new Error(`Invalid value "${value}" for data type ${dataTypeId}`);
+  }
+  
+  return true;
+};
+
+// Usage
+await validateSetting(1, "25");        // Valid INTEGER
+await validateSetting(1, "not-a-number"); // Throws error
+```
+
+```python Dynamic Form Generation
+# Generate form fields based on data types
+import requests
+
+def generate_form_fields():
+    response = requests.get(
+        "https://api.invernaderos.com/api/v1/catalog/data-types/active",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    
+    data_types = response.json()
+    form_fields = []
+    
+    for dt in data_types:
+        field = {
+            "id": dt["id"],
+            "label": dt["name"],
+            "type": map_to_html_input_type(dt["name"]),
+            "placeholder": dt["exampleValue"],
+            "pattern": dt["validationRegex"],
+            "required": True
+        }
+        form_fields.append(field)
+    
+    return form_fields
+
+def map_to_html_input_type(data_type_name):
+    mapping = {
+        "INTEGER": "number",
+        "DOUBLE": "number",
+        "BOOLEAN": "checkbox",
+        "DATE": "date",
+        "TIME": "time",
+        "DATETIME": "datetime-local",
+        "STRING": "text",
+        "JSON": "textarea"
+    }
+    return mapping.get(data_type_name, "text")
+```
+
+```kotlin Android Client Validation
+// Validate input before sending to API
+class DataTypeValidator(private val api: InvernaderosApi) {
+    
+    suspend fun validateValue(dataTypeId: Short, value: String): Boolean {
+        val response = api.validateDataTypeValue(dataTypeId, value)
+        return response.isValid
+    }
+    
+    // Cache data types for offline validation
+    suspend fun cacheDataTypes() {
+        val dataTypes = api.getActiveDataTypes()
+        dataTypes.forEach { dt ->
+            when (dt.name) {
+                "INTEGER" -> cacheValidationRule(dt.id) { it.toIntOrNull() != null }
+                "DOUBLE" -> cacheValidationRule(dt.id) { it.toDoubleOrNull() != null }
+                "BOOLEAN" -> cacheValidationRule(dt.id) { 
+                    it.lowercase() in listOf("true", "false", "1", "0")
+                }
+                else -> cacheValidationRule(dt.id) { 
+                    dt.validationRegex?.toRegex()?.matches(it) ?: true
+                }
+            }
+        }
+    }
+}
+```
+</CodeGroup>
+
+---
+
+## Error Codes
+
+| Status Code | Description | Resolution |
+|-------------|-------------|------------|
+| **200 OK** | Request successful | - |
+| **201 Created** | Data type created successfully | - |
+| **204 No Content** | Data type deleted successfully | - |
+| **400 Bad Request** | Invalid input (duplicate name, invalid regex, validation error) | Check error message for details |
+| **404 Not Found** | Data type not found with specified ID or name | Verify the ID/name exists |
+| **409 Conflict** | Cannot delete system data type (IDs 1-9) | Use inactive status instead of deletion |
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Custom Data Types">
+    When creating custom data types:
+    
+    1. **Use descriptive names** (e.g., `PERCENTAGE`, `PHONE_NUMBER`, `EMAIL`)
+    2. **Provide validation regex** for strict input validation
+    3. **Include example values** to guide users
+    4. **Set appropriate display order** to group related types
+    
+    Example:
+    ```json
+    {
+      "name": "EMAIL",
+      "description": "Valid email address",
+      "validationRegex": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+      "exampleValue": "user@example.com",
+      "displayOrder": 15,
+      "isActive": true
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Validation Performance">
+    - **Cache active data types** on client side to reduce API calls
+    - **Validate on client first** before sending to `/validate` endpoint
+    - **Use regex validation** for custom types to maintain consistency
+    - **Batch validate** multiple values if possible (client-side cache)
+  </Accordion>
+  
+  <Accordion title="Soft Deletes vs Hard Deletes">
+    - **Prefer soft deletes** (`isActive = false`) to preserve historical data
+    - **Only hard delete** truly unused custom types
+    - **Never delete system types** (IDs 1-9 are protected)
+    - **Document deprecation** in the description field before deactivating
+  </Accordion>
+</AccordionGroup>

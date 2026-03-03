@@ -1,0 +1,653 @@
+---
+title: 'Environment Configuration'
+description: 'Configure environment variables, database connections, and application settings'
+icon: 'gear'
+---
+
+## Overview
+
+The Invernaderos API uses **Spring Boot profiles** and **environment variables** for configuration across different environments (local, dev, prod).
+
+<Note>
+  Configuration follows the **12-factor app** methodology with externalized configuration and secrets management.
+</Note>
+
+## Configuration Structure
+
+```
+src/main/resources/
+├── application-dev.yaml      # Development profile
+├── application-prod.yaml     # Production profile
+└── db/migration/             # Flyway migrations
+```
+
+## Spring Profiles
+
+### Development Profile (`dev`)
+
+<Accordion title="View application-dev.yaml">
+  ```yaml
+  # =============================================================================
+  # PERFIL DEV - Configuración para desarrollo local y entorno de desarrollo
+  # =============================================================================
+  # Activar con: --spring.profiles.active=dev
+  # O variable de entorno: SPRING_PROFILES_ACTIVE=dev
+  # =============================================================================
+
+  # Flyway: Auto-migrate habilitado para desarrollo rápido
+  flyway:
+    auto-migrate: true
+
+  # Simulación habilitada para desarrollo sin sensores físicos
+  greenhouse:
+    simulation:
+      enabled: true
+
+  # Logging más detallado para debugging
+  logging:
+    level:
+      org.flywaydb: DEBUG
+      com.apptolast.invernaderos: DEBUG
+  ```
+
+  **Key Features**:
+  - **Auto-migration**: Database migrations run automatically on startup
+  - **Simulation mode**: Generates fake sensor data every 5 seconds
+  - **Debug logging**: Detailed logs for development and troubleshooting
+
+  **When to use**:
+  - Local development with Docker Compose
+  - Development Kubernetes namespace
+  - Testing without physical sensors
+</Accordion>
+
+### Production Profile (`prod`)
+
+<Accordion title="View application-prod.yaml">
+  ```yaml
+  # =============================================================================
+  # PERFIL PROD - Configuración para producción
+  # =============================================================================
+  # Activar con: --spring.profiles.active=prod
+  # O variable de entorno: SPRING_PROFILES_ACTIVE=prod
+  # =============================================================================
+  #
+  # IMPORTANTE - ESTRATEGIA DE MIGRACIONES EN PROD:
+  # Las migraciones NO se ejecutan automáticamente al arrancar la aplicación.
+  # Deben ejecutarse via CI/CD ANTES del deploy usando:
+  #
+  #   flyway -url=jdbc:postgresql://host:port/greenhouse_metadata \
+  #          -user=admin -password=xxx \
+  #          -schemas=metadata \
+  #          -locations=classpath:db/migration \
+  #          migrate
+  #
+  # Documentación: https://documentation.red-gate.com/fd/recommended-practices-150700352.html
+  # =============================================================================
+
+  # Flyway: Solo VALIDATE, NO auto-migrate
+  # Las migraciones se ejecutan via CI/CD antes del deploy
+  flyway:
+    auto-migrate: false
+
+  # Simulación DESHABILITADA en producción (usar sensores reales)
+  greenhouse:
+    simulation:
+      enabled: false
+
+  # Logging optimizado para producción
+  logging:
+    level:
+      root: INFO
+      org.flywaydb: INFO
+      com.apptolast.invernaderos: INFO
+      org.hibernate.SQL: WARN
+  ```
+
+  **Key Features**:
+  - **Manual migrations**: Migrations run via CI/CD before deployment (safer)
+  - **Simulation disabled**: Uses real sensor data from MQTT
+  - **Production logging**: INFO level to reduce log volume
+
+  **When to use**:
+  - Production Kubernetes deployment
+  - Staging environment
+  - Any environment with real sensors
+</Accordion>
+
+## Environment Variables
+
+### Database Configuration
+
+#### TimescaleDB (Time-Series Database)
+
+<CodeGroup>
+```bash Docker Compose
+TIMESCALE_DB_NAME=greenhouse_timeseries
+TIMESCALE_USER=admin
+TIMESCALE_PASSWORD=<secure_password>
+```
+
+```yaml Kubernetes
+env:
+- name: TIMESCALE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: timescale-password
+```
+</CodeGroup>
+
+**Connection URL**: 
+- **Docker**: `jdbc:postgresql://timescaledb:5432/greenhouse_timeseries`
+- **Kubernetes**: `jdbc:postgresql://timescaledb.apptolast-invernadero-api.svc.cluster.local:5432/greenhouse_timeseries`
+
+**Schema**: `iot`
+
+**Tables**:
+- `sensor_readings` - Hypertable with 7-day chunks
+- `sensor_readings_hourly` - Continuous aggregate (hourly stats)
+- `sensor_readings_daily_by_tenant` - Continuous aggregate (daily tenant stats)
+
+**Configuration Details**:
+```yaml
+spring:
+  datasource:
+    timescale:
+      jdbc-url: jdbc:postgresql://${TIMESCALE_HOST:localhost}:${TIMESCALE_PORT:5432}/${TIMESCALE_DB_NAME:greenhouse_timeseries}
+      username: ${TIMESCALE_USER:admin}
+      password: ${TIMESCALE_PASSWORD}
+      driver-class-name: org.postgresql.Driver
+      hikari:
+        pool-name: TimescaleHikariPool
+        maximum-pool-size: 20
+        minimum-idle: 5
+        connection-timeout: 30000
+        idle-timeout: 600000
+        max-lifetime: 1800000
+```
+
+#### PostgreSQL Metadata
+
+<CodeGroup>
+```bash Docker Compose
+METADATA_DB_NAME=greenhouse_metadata
+METADATA_USER=admin
+METADATA_PASSWORD=<secure_password>
+```
+
+```yaml Kubernetes
+env:
+- name: METADATA_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: metadata-password
+```
+</CodeGroup>
+
+**Connection URL**:
+- **Docker**: `jdbc:postgresql://postgresql-metadata:5432/postgres`
+- **Kubernetes**: `jdbc:postgresql://postgresql-metadata.apptolast-invernadero-api.svc.cluster.local:5432/postgres`
+
+**Schema**: `metadata`
+
+**Tables**:
+- `tenants` - Multi-tenant isolation
+- `greenhouses` - Greenhouse configurations
+- `sensors`, `actuators` - Device registry
+- `users` - User management
+- `alerts` - Alert history
+- `mqtt_users` - MQTT authentication
+
+**Configuration Details**:
+```yaml
+spring:
+  datasource:
+    metadata:
+      jdbc-url: jdbc:postgresql://${METADATA_HOST:localhost}:${METADATA_PORT:5432}/${METADATA_DB_NAME:postgres}
+      username: ${METADATA_USER:admin}
+      password: ${METADATA_PASSWORD}
+      driver-class-name: org.postgresql.Driver
+      hikari:
+        pool-name: MetadataHikariPool
+        maximum-pool-size: 10
+        minimum-idle: 2
+        connection-timeout: 30000
+```
+
+### Redis Configuration
+
+<CodeGroup>
+```bash Docker Compose
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<secure_password>
+```
+
+```yaml Kubernetes
+env:
+- name: REDIS_HOST
+  value: "redis.apptolast-invernadero-api.svc.cluster.local"
+- name: REDIS_PORT
+  value: "6379"
+- name: REDIS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: redis-password
+```
+</CodeGroup>
+
+**Data Structure**: Sorted Set (ZSET)
+
+**Key**: `greenhouse:messages`
+
+**TTL**: 24 hours (renewed on each write)
+
+**Max Size**: 1000 messages (oldest auto-evicted)
+
+**Configuration Details**:
+```yaml
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: 0
+      timeout: 60000ms
+      connect-timeout: 10000ms
+      client-type: lettuce
+      lettuce:
+        pool:
+          max-active: 100
+          max-idle: 50
+          min-idle: 10
+          max-wait: 3000ms
+        shutdown-timeout: 2000ms
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000  # 10 minutes
+      cache-null-values: false
+      key-prefix: "ts-app::"
+      use-key-prefix: true
+```
+
+<Note>
+  **Lettuce vs Jedis**: The API uses **Lettuce** (async, reactive client) instead of Jedis for better performance and non-blocking I/O.
+</Note>
+
+### MQTT Configuration
+
+<CodeGroup>
+```bash Docker Compose
+MQTT_BROKER_URL=tcp://emqx:1883
+MQTT_USERNAME=<mqtt_user>
+MQTT_PASSWORD=<secure_password>
+MQTT_CLIENT_ID_PREFIX=api_local_001
+```
+
+```yaml Kubernetes (Production)
+env:
+- name: MQTT_BROKER_URL
+  value: "wss://mqttinvernaderoapi-ws.apptolast.com/mqtt"
+- name: MQTT_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: mqtt-username
+- name: MQTT_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: mqtt-password
+- name: MQTT_CLIENT_ID_PREFIX
+  value: "api_prod_001"
+```
+</CodeGroup>
+
+**Topics**:
+- `GREENHOUSE/{tenantId}` - Multi-tenant sensor data (e.g., `GREENHOUSE/SARA`)
+- `GREENHOUSE` - Legacy topic (maps to `DEFAULT` tenant)
+- `GREENHOUSE/RESPONSE` - Echo for verification
+
+**QoS Levels**:
+- **0 (At most once)**: Sensor data (high frequency, loss acceptable)
+- **1 (At least once)**: Actuator commands (delivery important)
+- **2 (Exactly once)**: Critical alerts (no duplicates)
+
+**Configuration Details**:
+```yaml
+mqtt:
+  broker:
+    url: ${MQTT_BROKER_URL:tcp://localhost:1883}
+    username: ${MQTT_USERNAME}
+    password: ${MQTT_PASSWORD}
+    client-id-prefix: ${MQTT_CLIENT_ID_PREFIX:api_default}
+  inbound:
+    topics:
+      - GREENHOUSE
+      - GREENHOUSE/#
+      - SENSOR/#
+      - ACTUATOR/#
+    qos: 0
+    clean-session: false
+  outbound:
+    qos: 0
+    retained: false
+```
+
+<Warning>
+  **WebSocket Secure (WSS)**: Production uses `wss://` for encrypted MQTT over WebSocket. Development uses `tcp://` for simplicity.
+</Warning>
+
+## Flyway Migration Settings
+
+### Development (Auto-Migrate)
+
+```yaml
+flyway:
+  auto-migrate: true
+  schemas:
+    - metadata  # PostgreSQL Metadata
+    - iot       # TimescaleDB (manual connection)
+  locations:
+    - classpath:db/migration
+  baseline-on-migrate: true
+  validate-on-migrate: true
+```
+
+**Behavior**:
+- Migrations run **automatically** on startup
+- Creates schemas if they don't exist
+- Validates checksums to detect manual changes
+
+### Production (Manual Migration via CI/CD)
+
+```yaml
+flyway:
+  auto-migrate: false
+```
+
+**Recommended Workflow**:
+
+<Steps>
+  <Step title="Run migrations before deployment">
+    Use Flyway CLI in CI/CD pipeline:
+
+    ```bash
+    flyway -url=jdbc:postgresql://timescaledb:5432/greenhouse_timeseries \
+           -user=admin -password=${TIMESCALE_PASSWORD} \
+           -schemas=iot \
+           -locations=filesystem:./src/main/resources/db/migration \
+           migrate
+    
+    flyway -url=jdbc:postgresql://postgresql-metadata:5432/postgres \
+           -user=admin -password=${METADATA_PASSWORD} \
+           -schemas=metadata \
+           -locations=filesystem:./src/main/resources/db/migration \
+           migrate
+    ```
+  </Step>
+
+  <Step title="Validate migrations on startup">
+    Application validates that database schema matches expected state:
+
+    ```yaml
+    flyway:
+      auto-migrate: false
+      validate-on-migrate: true  # Fails if schema doesn't match
+    ```
+  </Step>
+
+  <Step title="Deploy application">
+    Only after successful migration, deploy the application.
+  </Step>
+</Steps>
+
+<Note>
+  **Why manual migrations in prod?** Prevents accidental schema changes, allows rollback testing, and provides audit trail via CI/CD logs.
+</Note>
+
+### Migration Files
+
+**Naming Convention**: `V{version}__{description}.sql`
+
+Examples:
+- `V2__fix_composite_primary_key.sql`
+- `V8__uuid_migration_and_schema_change.sql`
+- `V11__create_staging_infrastructure_timescaledb.sql`
+
+**Current Version**: V11 (as of Nov 2025)
+
+**Migration Locations**:
+```
+src/main/resources/db/migration/
+├── V2__fix_composite_primary_key.sql
+├── V3__add_tenant_company_fields.sql
+├── V4__add_greenhouse_mqtt_fields.sql
+├── V5__add_sensor_multi_tenant_fields.sql
+├── V6__extend_actuators_table.sql
+├── V7__migrate_existing_data_to_default_tenant.sql
+├── V8__uuid_migration_and_schema_change.sql
+├── V9__add_multi_tenant_indexes.sql
+├── V10__extend_alerts_table.sql
+└── V11__create_staging_infrastructure_timescaledb.sql
+```
+
+## Security Configuration
+
+### Password Generation
+
+<CodeGroup>
+```bash OpenSSL
+# Generate 32-character base64 password
+openssl rand -base64 32
+```
+
+```bash Generate All Passwords
+#!/bin/bash
+echo "TIMESCALE_PASSWORD=$(openssl rand -base64 32)"
+echo "METADATA_PASSWORD=$(openssl rand -base64 32)"
+echo "REDIS_PASSWORD=$(openssl rand -base64 32)"
+echo "MQTT_PASSWORD=$(openssl rand -base64 32)"
+echo "EMQX_DASHBOARD_PASSWORD=$(openssl rand -base64 32)"
+```
+</CodeGroup>
+
+### Secrets Management
+
+<Warning>
+  **NEVER commit secrets to version control!** Use:
+  - `.env` files (local, gitignored)
+  - Kubernetes Secrets (base64 encoded)
+  - External secret managers (AWS Secrets Manager, HashiCorp Vault)
+</Warning>
+
+#### Docker Compose (`.env` file)
+
+```bash
+# .env (NEVER commit this file)
+TIMESCALE_PASSWORD=abc123xyz...
+METADATA_PASSWORD=def456uvw...
+REDIS_PASSWORD=ghi789rst...
+MQTT_PASSWORD=jkl012mno...
+EMQX_DASHBOARD_PASSWORD=pqr345stu...
+```
+
+#### Kubernetes Secrets
+
+<CodeGroup>
+```bash Create Secret
+kubectl create secret generic invernaderos-api-secret \
+  --from-literal=timescale-password="$(openssl rand -base64 32)" \
+  --from-literal=metadata-password="$(openssl rand -base64 32)" \
+  --from-literal=redis-password="$(openssl rand -base64 32)" \
+  --from-literal=mqtt-username="greenhouse_api" \
+  --from-literal=mqtt-password="$(openssl rand -base64 32)" \
+  -n apptolast-invernadero-api
+```
+
+```yaml Reference in Deployment
+env:
+- name: TIMESCALE_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: invernaderos-api-secret
+      key: timescale-password
+```
+</CodeGroup>
+
+## Simulation Mode
+
+<Note>
+  **Simulation mode** generates realistic fake sensor data when physical sensors are unavailable.
+</Note>
+
+### Enable Simulation
+
+```yaml
+greenhouse:
+  simulation:
+    enabled: true
+    greenhouse-id: "001"
+    interval: 5000  # milliseconds
+```
+
+**Generated Data**:
+- **Temperature**: 15-30°C with gradual variations
+- **Humidity**: 40-80% with gradual variations
+- **Sectors**: 12 sectors with random values
+- **Extractors**: 3 extractors with random states
+
+**Log Warning**:
+```
+⚠️ SIMULATION MODE ENABLED - Generating fake greenhouse data
+```
+
+<Warning>
+  **ALWAYS disable simulation in production!** Set `greenhouse.simulation.enabled: false` in production profile.
+</Warning>
+
+## JVM Configuration
+
+### Memory Settings
+
+<CodeGroup>
+```bash Docker Compose
+JAVA_OPTS=-Xms256m -Xmx512m
+```
+
+```yaml Kubernetes (Production)
+env:
+- name: JAVA_OPTS
+  value: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
+```
+</CodeGroup>
+
+**Recommendations**:
+- **Development**: `-Xms256m -Xmx512m`
+- **Production**: `-Xms512m -Xmx1024m` (or higher based on load)
+- **GC**: G1GC for better pause times
+
+### Health Check Configuration
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+```
+
+**Endpoints**:
+- `/actuator/health` - Overall health
+- `/actuator/health/liveness` - Kubernetes liveness probe
+- `/actuator/health/readiness` - Kubernetes readiness probe
+- `/actuator/metrics` - Micrometer metrics
+- `/actuator/prometheus` - Prometheus scraping endpoint
+
+## Profile Activation
+
+### Docker Compose
+
+```yaml
+services:
+  api:
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+```
+
+### Kubernetes
+
+```yaml
+env:
+- name: SPRING_PROFILES_ACTIVE
+  value: "prod"
+```
+
+### Command Line
+
+```bash
+# Gradle
+./gradlew bootRun --args='--spring.profiles.active=dev'
+
+# JAR
+java -jar app.jar --spring.profiles.active=prod
+
+# Environment Variable
+export SPRING_PROFILES_ACTIVE=dev
+java -jar app.jar
+```
+
+## Configuration Validation
+
+Verify configuration on startup:
+
+```bash
+# Check loaded properties
+curl http://localhost:8080/actuator/env
+
+# Check active profile
+curl http://localhost:8080/actuator/info
+```
+
+Expected response:
+```json
+{
+  "app": {
+    "name": "Invernaderos API",
+    "version": "0.0.1-SNAPSHOT",
+    "profiles": ["prod"]
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Docker Compose" icon="docker" href="/deployment/docker-compose">
+    Deploy locally with Docker Compose
+  </Card>
+  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy to production with Kubernetes
+  </Card>
+  <Card title="Database Migrations" icon="database" href="/database/migrations">
+    Manage Flyway database migrations
+  </Card>
+  <Card title="Security" icon="shield" href="/security/best-practices">
+    Security best practices
+  </Card>
+</CardGroup>

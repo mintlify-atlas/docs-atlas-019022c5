@@ -1,0 +1,370 @@
+---
+title: 'Tenant Management'
+description: 'CRUD operations for managing tenants (clients/customers)'
+---
+
+## Overview
+
+Tenants represent clients or customers in the Invernaderos system. Each tenant can have multiple greenhouses, users, and alerts associated with them.
+
+## Get All Tenants
+
+<RequestExample>
+```bash GET /api/v1/tenants
+curl -X GET "https://api.invernaderos.com/api/v1/tenants?search=Sara&province=Almería&isActive=true" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve all tenants with optional filtering.
+
+### Query Parameters
+
+<ParamField query="search" type="string">
+  Search term to filter tenants by name, email, or company name
+</ParamField>
+
+<ParamField query="province" type="string">
+  Filter by province (e.g., "Almería", "Granada")
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status (true/false)
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">
+  Unique identifier of the tenant
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unique readable code (e.g., "TNT-00001")
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Tenant name or company name
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Contact email address
+</ResponseField>
+
+<ResponseField name="phone" type="string">
+  Contact phone number
+</ResponseField>
+
+<ResponseField name="province" type="string">
+  Province where the tenant is located
+</ResponseField>
+
+<ResponseField name="country" type="string">
+  Country where the tenant is located
+</ResponseField>
+
+<ResponseField name="location" type="object">
+  Geographic coordinates
+  <ResponseField name="lat" type="double">
+    Latitude (e.g., 36.8381)
+  </ResponseField>
+  <ResponseField name="lon" type="double">
+    Longitude (e.g., -2.4597)
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the tenant is active
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Status for UI display ("Activo", "Pendiente", "Inactivo")
+</ResponseField>
+
+<ResponseExample>
+```json Response
+[
+  {
+    "id": 1,
+    "code": "TNT-00001",
+    "name": "Vivero Sara",
+    "email": "sara@vivero.com",
+    "phone": "+34 612 345 678",
+    "province": "Almería",
+    "country": "España",
+    "location": {
+      "lat": 36.8381,
+      "lon": -2.4597
+    },
+    "isActive": true,
+    "status": "Activo"
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Tenant by ID
+
+<RequestExample>
+```bash GET /api/v1/tenants/{id}
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve a specific tenant by its ID.
+
+### Path Parameters
+
+<ParamField path="id" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Response
+
+Returns a single tenant object with the same structure as above.
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "TNT-00001",
+  "name": "Vivero Sara",
+  "email": "sara@vivero.com",
+  "phone": "+34 612 345 678",
+  "province": "Almería",
+  "country": "España",
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "isActive": true,
+  "status": "Activo"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Tenant not found"
+}
+```
+</ResponseExample>
+
+---
+
+## Create Tenant
+
+<RequestExample>
+```bash POST /api/v1/tenants
+curl -X POST "https://api.invernaderos.com/api/v1/tenants" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Elena Rodriguez",
+    "email": "elena@freshveg.com",
+    "phone": "+34 612 345 678",
+    "province": "Almería",
+    "country": "España",
+    "location": {
+      "lat": 36.8381,
+      "lon": -2.4597
+    },
+    "status": "Activo"
+  }'
+```
+</RequestExample>
+
+Create a new tenant in the system.
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Full name of the client or company
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Contact email address
+</ParamField>
+
+<ParamField body="phone" type="string">
+  Contact phone number
+</ParamField>
+
+<ParamField body="province" type="string">
+  Province (e.g., "Almería", "Granada")
+</ParamField>
+
+<ParamField body="country" type="string" default="España">
+  Country name
+</ParamField>
+
+<ParamField body="location" type="object">
+  Geographic coordinates
+  <ParamField body="lat" type="double">
+    Latitude
+  </ParamField>
+  <ParamField body="lon" type="double">
+    Longitude
+  </ParamField>
+</ParamField>
+
+<ParamField body="status" type="string" default="Activo">
+  Initial status ("Activo", "Pendiente", "Inactivo")
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 - Created
+{
+  "id": 2,
+  "code": "TNT-00002",
+  "name": "Elena Rodriguez",
+  "email": "elena@freshveg.com",
+  "phone": "+34 612 345 678",
+  "province": "Almería",
+  "country": "España",
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "isActive": true,
+  "status": "Activo"
+}
+```
+</ResponseExample>
+
+---
+
+## Update Tenant
+
+<RequestExample>
+```bash PUT /api/v1/tenants/{id}
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Vivero Sara S.L.",
+    "phone": "+34 612 999 888"
+  }'
+```
+</RequestExample>
+
+Update an existing tenant. All fields are optional.
+
+### Path Parameters
+
+<ParamField path="id" type="long" required>
+  Unique identifier of the tenant to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  Full name of the client or company
+</ParamField>
+
+<ParamField body="email" type="string">
+  Contact email address
+</ParamField>
+
+<ParamField body="phone" type="string">
+  Contact phone number
+</ParamField>
+
+<ParamField body="province" type="string">
+  Province
+</ParamField>
+
+<ParamField body="country" type="string">
+  Country name
+</ParamField>
+
+<ParamField body="location" type="object">
+  Geographic coordinates
+</ParamField>
+
+<ParamField body="status" type="string">
+  Status ("Activo", "Pendiente", "Inactivo")
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "TNT-00001",
+  "name": "Vivero Sara S.L.",
+  "email": "sara@vivero.com",
+  "phone": "+34 612 999 888",
+  "province": "Almería",
+  "country": "España",
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "isActive": true,
+  "status": "Activo"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Tenant not found"
+}
+```
+</ResponseExample>
+
+---
+
+## Delete Tenant
+
+<RequestExample>
+```bash DELETE /api/v1/tenants/{id}
+curl -X DELETE "https://api.invernaderos.com/api/v1/tenants/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Delete a tenant from the system.
+
+### Path Parameters
+
+<ParamField path="id" type="long" required>
+  Unique identifier of the tenant to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```bash 204 - No Content
+# Successfully deleted
+```
+
+```json 404 - Not Found
+{
+  "error": "Tenant not found"
+}
+```
+</ResponseExample>
+
+---
+
+## Tenant Configuration
+
+Each tenant in the system can be configured with:
+
+- **Company details**: Name, email, phone, location
+- **Geographic data**: Province, country, GPS coordinates
+- **Status management**: Active, Pending, or Inactive states
+- **Multi-tenant isolation**: All data (greenhouses, users, alerts) is isolated per tenant
+
+## Related Resources
+
+- [Greenhouse Management](/api/tenants/greenhouses) - Manage greenhouses for a tenant
+- [User Management](/api/tenants/users) - Manage users for a tenant
+- [Alert Management](/api/tenants/alerts) - View and manage alerts for a tenant

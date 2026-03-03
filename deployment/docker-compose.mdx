@@ -1,0 +1,580 @@
+---
+title: 'Docker Compose Deployment'
+description: 'Deploy the Invernaderos API using Docker Compose for local development'
+icon: 'docker'
+---
+
+## Overview
+
+Docker Compose provides a complete local development environment with all services: API, TimescaleDB, PostgreSQL, Redis, and EMQX MQTT broker.
+
+<Note>
+  This deployment is ideal for **local development and testing**. For production deployments, use [Kubernetes](/deployment/kubernetes).
+</Note>
+
+## Architecture
+
+The `docker-compose.yaml` defines a complete stack:
+
+```
+┌─────────────────┐
+│  API (8080)     │──┐
+└─────────────────┘  │
+                     ├──> TimescaleDB (5432)
+┌─────────────────┐  │
+│  EMQX (1883)    │──┼──> PostgreSQL (5433)
+└─────────────────┘  │
+                     ├──> Redis (6379)
+                     └──> Bridge Network
+```
+
+## Prerequisites
+
+- **Docker Desktop** or Docker Engine v20.10+
+- **Docker Compose** v2.0+
+- At least **4GB RAM** allocated to Docker
+- Ports available: 8080, 5432, 5433, 6379, 1883, 8883, 8083, 8084, 18083
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/apptolast/InvernaderosAPI.git
+    cd InvernaderosAPI
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Copy the example file and generate secure passwords:
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    Edit `.env` and replace placeholders with secure passwords:
+
+    ```bash
+    # Generate secure passwords
+    openssl rand -base64 32
+    ```
+
+    <Warning>
+      **NEVER commit `.env` to version control!** It contains sensitive credentials.
+    </Warning>
+  </Step>
+
+  <Step title="Start all services">
+    ```bash
+    docker-compose up -d
+    ```
+
+    View logs:
+    ```bash
+    docker-compose logs -f api
+    ```
+  </Step>
+
+  <Step title="Verify deployment">
+    Health check:
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+
+    Expected response:
+    ```json
+    {
+      "status": "UP",
+      "components": {
+        "timescaledb": {"status": "UP"},
+        "postgresql": {"status": "UP"},
+        "redis": {"status": "UP"}
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Service Configuration
+
+### TimescaleDB (Time-Series Database)
+
+<Accordion title="View Configuration">
+  ```yaml
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: invernaderos-timescaledb
+    environment:
+      POSTGRES_DB: ${TIMESCALE_DB_NAME:-greenhouse_timeseries}
+      POSTGRES_USER: ${TIMESCALE_USER:-admin}
+      POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d greenhouse_timeseries"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  ```
+
+  **Purpose**: Stores time-series sensor readings in hypertables optimized for time-based queries.
+
+  **Schema**: `iot`
+
+  **Key Tables**:
+  - `sensor_readings` - Hypertable with 7-day chunks, 2-year retention
+
+  **Access**:
+  ```bash
+  docker exec -it invernaderos-timescaledb psql -U admin -d greenhouse_timeseries
+  ```
+</Accordion>
+
+### PostgreSQL (Metadata Database)
+
+<Accordion title="View Configuration">
+  ```yaml
+  postgresql-metadata:
+    image: postgres:16-alpine
+    container_name: invernaderos-postgres-metadata
+    environment:
+      POSTGRES_DB: ${METADATA_DB_NAME:-greenhouse_metadata}
+      POSTGRES_USER: ${METADATA_USER:-admin}
+      POSTGRES_PASSWORD: ${METADATA_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5433:5432"  # External: 5433, Internal: 5432
+    volumes:
+      - postgres_metadata_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d greenhouse_metadata"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  ```
+
+  **Purpose**: Stores reference data (greenhouses, sensors, users, tenants).
+
+  **Schema**: `metadata`
+
+  **Key Tables**:
+  - `tenants` - Multi-tenant isolation
+  - `greenhouses` - Greenhouse configurations
+  - `sensors`, `actuators` - Device registry
+  - `users` - User management
+  - `alerts` - Alert history
+
+  **Access**:
+  ```bash
+  docker exec -it invernaderos-postgres-metadata psql -U admin -d greenhouse_metadata
+  ```
+</Accordion>
+
+### Redis (Cache)
+
+<Accordion title="View Configuration">
+  ```yaml
+  redis:
+    image: redis:7-alpine
+    container_name: invernaderos-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+  ```
+
+  **Purpose**: Caches last 1000 sensor messages for fast retrieval.
+
+  **Data Structure**: Sorted Set (ZSET) with timestamp scores
+
+  **Key**: `greenhouse:messages`
+
+  **TTL**: 24 hours (renewed on each write)
+
+  **Access**:
+  ```bash
+  docker exec -it invernaderos-redis redis-cli -a "${REDIS_PASSWORD}"
+  
+  # View cached messages
+  ZREVRANGE greenhouse:messages 0 10 WITHSCORES
+  ```
+</Accordion>
+
+### EMQX (MQTT Broker)
+
+<Accordion title="View Configuration">
+  ```yaml
+  emqx:
+    image: emqx/emqx:latest
+    container_name: invernaderos-emqx
+    environment:
+      EMQX_NAME: invernaderos-emqx
+      EMQX_HOST: 127.0.0.1
+      EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USERNAME:-admin}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
+    ports:
+      - "1883:1883"      # MQTT
+      - "8883:8883"      # MQTT/SSL
+      - "8083:8083"      # MQTT/WebSocket
+      - "8084:8084"      # MQTT/WebSocket/SSL
+      - "18083:18083"    # Dashboard
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  ```
+
+  **Purpose**: Receives sensor data from IoT devices via MQTT protocol.
+
+  **Topics**:
+  - `GREENHOUSE/{tenantId}` - Multi-tenant sensor data
+  - `GREENHOUSE` - Legacy topic (maps to DEFAULT tenant)
+  - `GREENHOUSE/RESPONSE` - Echo for verification
+
+  **Dashboard**: http://localhost:18083 (login with `EMQX_DASHBOARD_USERNAME`/`PASSWORD`)
+
+  **Test Connection**:
+  ```bash
+  # Subscribe to messages
+  mosquitto_sub -h localhost -p 1883 -t "GREENHOUSE/#" -u "${MQTT_USERNAME}" -P "${MQTT_PASSWORD}"
+  
+  # Publish test message
+  mosquitto_pub -h localhost -p 1883 -t "GREENHOUSE/SARA" \
+    -m '{"TEMPERATURA INVERNADERO 01": 25.5, "HUMEDAD INVERNADERO 01": 65.0}' \
+    -u "${MQTT_USERNAME}" -P "${MQTT_PASSWORD}"
+  ```
+</Accordion>
+
+### API (Spring Boot)
+
+<Accordion title="View Configuration">
+  ```yaml
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: invernaderos-api
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx512m}
+      TIMESCALE_PASSWORD: ${TIMESCALE_PASSWORD}
+      METADATA_PASSWORD: ${METADATA_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-tcp://emqx:1883}
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      MQTT_CLIENT_ID_PREFIX: ${MQTT_CLIENT_ID_PREFIX:-api_local_001}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./application-local.yaml:/app/config/application.yaml:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      postgresql-metadata:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+  ```
+
+  **Endpoints**:
+  - **API**: http://localhost:8080
+  - **Swagger UI**: http://localhost:8080/swagger-ui.html
+  - **Health**: http://localhost:8080/actuator/health
+  - **OpenAPI Docs**: http://localhost:8080/v3/api-docs
+</Accordion>
+
+## Environment Variables
+
+<CodeGroup>
+```bash .env
+# TimescaleDB
+TIMESCALE_DB_NAME=greenhouse_timeseries
+TIMESCALE_USER=admin
+TIMESCALE_PASSWORD=<generated_password>
+
+# PostgreSQL Metadata
+METADATA_DB_NAME=greenhouse_metadata
+METADATA_USER=admin
+METADATA_PASSWORD=<generated_password>
+
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<generated_password>
+
+# MQTT
+MQTT_BROKER_URL=tcp://emqx:1883
+MQTT_USERNAME=<your_mqtt_user>
+MQTT_PASSWORD=<generated_password>
+MQTT_CLIENT_ID_PREFIX=api_local_001
+
+# EMQX Dashboard
+EMQX_DASHBOARD_USERNAME=admin
+EMQX_DASHBOARD_PASSWORD=<generated_password>
+
+# Spring Boot
+SPRING_PROFILES_ACTIVE=local
+JAVA_OPTS=-Xms256m -Xmx512m
+```
+
+```bash Generate Passwords
+# Generate secure passwords (32 characters)
+for service in TIMESCALE METADATA REDIS MQTT EMQX_DASHBOARD; do
+  echo "${service}_PASSWORD=$(openssl rand -base64 32)"
+done
+```
+</CodeGroup>
+
+<Warning>
+  **Security Best Practices**:
+  - Use different passwords for each service
+  - Never commit `.env` to version control
+  - Rotate credentials regularly
+  - Use minimum required permissions
+</Warning>
+
+## Volumes and Persistence
+
+All data is persisted in named Docker volumes:
+
+```yaml
+volumes:
+  timescaledb_data:
+    name: invernaderos-timescaledb-data
+  postgres_metadata_data:
+    name: invernaderos-postgres-metadata-data
+  redis_data:
+    name: invernaderos-redis-data
+  emqx_data:
+    name: invernaderos-emqx-data
+  emqx_log:
+    name: invernaderos-emqx-log
+```
+
+### Backup Volumes
+
+```bash
+# Backup TimescaleDB
+docker exec invernaderos-timescaledb pg_dump -U admin greenhouse_timeseries > backup_timescale_$(date +%Y%m%d).sql
+
+# Backup PostgreSQL Metadata
+docker exec invernaderos-postgres-metadata pg_dump -U admin greenhouse_metadata > backup_metadata_$(date +%Y%m%d).sql
+
+# Backup Redis
+docker exec invernaderos-redis redis-cli -a "${REDIS_PASSWORD}" --rdb /data/dump.rdb
+docker cp invernaderos-redis:/data/dump.rdb backup_redis_$(date +%Y%m%d).rdb
+```
+
+### Restore Volumes
+
+```bash
+# Restore TimescaleDB
+cat backup_timescale_20250116.sql | docker exec -i invernaderos-timescaledb psql -U admin greenhouse_timeseries
+
+# Restore PostgreSQL Metadata
+cat backup_metadata_20250116.sql | docker exec -i invernaderos-postgres-metadata psql -U admin greenhouse_metadata
+
+# Restore Redis
+docker cp backup_redis_20250116.rdb invernaderos-redis:/data/dump.rdb
+docker restart invernaderos-redis
+```
+
+## Common Operations
+
+### Start Services
+
+```bash
+# Start all services
+docker-compose up -d
+
+# Start specific service
+docker-compose up -d api
+
+# Start with rebuild
+docker-compose up -d --build
+```
+
+### View Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f api
+
+# Last 100 lines
+docker-compose logs --tail=100 api
+```
+
+### Stop Services
+
+```bash
+# Stop all services (keeps data)
+docker-compose down
+
+# Stop and remove volumes (DELETES ALL DATA)
+docker-compose down -v
+```
+
+### Restart Service
+
+```bash
+# Restart API
+docker-compose restart api
+
+# Restart all
+docker-compose restart
+```
+
+### Check Status
+
+```bash
+# View running containers
+docker-compose ps
+
+# View resource usage
+docker stats
+```
+
+## Troubleshooting
+
+<Accordion title="API fails to start: 'Connection refused' to database">
+  **Cause**: API starts before databases are ready.
+
+  **Solution**: Check `depends_on` with health checks:
+
+  ```yaml
+  depends_on:
+    timescaledb:
+      condition: service_healthy
+    postgresql-metadata:
+      condition: service_healthy
+  ```
+
+  Verify database health:
+  ```bash
+  docker-compose ps
+  ```
+
+  Look for `(healthy)` status. If unhealthy:
+  ```bash
+  docker-compose logs timescaledb
+  docker-compose logs postgresql-metadata
+  ```
+</Accordion>
+
+<Accordion title="Port already in use: '5432'">
+  **Cause**: Another PostgreSQL instance is running on port 5432.
+
+  **Solution 1**: Stop conflicting service:
+  ```bash
+  # macOS
+  brew services stop postgresql
+  
+  # Linux
+  sudo systemctl stop postgresql
+  ```
+
+  **Solution 2**: Change port in `docker-compose.yaml`:
+  ```yaml
+  ports:
+    - "15432:5432"  # Use port 15432 instead
+  ```
+</Accordion>
+
+<Accordion title="EMQX dashboard shows 'Connection refused'">
+  **Cause**: EMQX container not fully started.
+
+  **Solution**: Wait for EMQX to initialize (can take 30-60 seconds):
+
+  ```bash
+  docker-compose logs -f emqx
+  ```
+
+  Wait for:
+  ```
+  EMQX 5.x is running now!
+  ```
+
+  Then access: http://localhost:18083
+</Accordion>
+
+<Accordion title="Redis authentication failed">
+  **Cause**: `REDIS_PASSWORD` not set or incorrect.
+
+  **Solution**: Verify password in `.env`:
+  ```bash
+  grep REDIS_PASSWORD .env
+  ```
+
+  Test connection:
+  ```bash
+  docker exec -it invernaderos-redis redis-cli -a "${REDIS_PASSWORD}" PING
+  ```
+
+  Expected: `PONG`
+</Accordion>
+
+<Accordion title="Out of disk space">
+  **Cause**: Docker volumes consuming too much space.
+
+  **Solution**: Clean up old data:
+
+  ```bash
+  # Check volume sizes
+  docker system df -v
+  
+  # Remove unused volumes
+  docker volume prune
+  
+  # Remove specific volume (DELETES DATA)
+  docker volume rm invernaderos-timescaledb-data
+  ```
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure environment variables, database connections, and application settings
+  </Card>
+  <Card title="Kubernetes Deployment" icon="dharmachakra" href="/deployment/kubernetes">
+    Deploy to production using Kubernetes with high availability
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/introduction">
+    Explore REST endpoints and WebSocket connections
+  </Card>
+  <Card title="MQTT Integration" icon="message" href="/integration/mqtt">
+    Connect IoT devices via MQTT protocol
+  </Card>
+</CardGroup>

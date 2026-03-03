@@ -1,0 +1,171 @@
+---
+title: 'Login'
+api: 'POST /api/v1/auth/login'
+description: 'Authenticate user with username/email and password to receive JWT token'
+---
+
+## Overview
+
+Authenticate a user by providing valid credentials (username or email and password). Upon successful authentication, the API returns a JWT token that must be included in subsequent API requests.
+
+## Request Body
+
+<ParamField body="username" type="string" required>
+  Username or email address of the user
+  
+  **Validation**: Must not be blank
+  
+  **Example**: `admin@company.com`
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password
+  
+  **Validation**: Must not be blank
+  
+  **Example**: `password123`
+</ParamField>
+
+## Response
+
+<ResponseField name="token" type="string" required>
+  JWT access token to be used for authentication in subsequent requests
+  
+  Include this token in the `Authorization` header as `Bearer {token}`
+</ResponseField>
+
+<ResponseField name="type" type="string" required>
+  Token type, always returns `"Bearer"`
+</ResponseField>
+
+<ResponseField name="username" type="string" required>
+  Username/email of the authenticated user
+</ResponseField>
+
+<ResponseField name="roles" type="string[]" required>
+  List of roles assigned to the user (e.g., `["ROLE_ADMIN", "ROLE_USER"]`)
+</ResponseField>
+
+## Authentication Flow
+
+<Steps>
+  <Step title="Validate Credentials">
+    The API validates the provided username/email and password using Spring Security's `AuthenticationManager`
+  </Step>
+  
+  <Step title="Load User Details">
+    Upon successful authentication, the user's details are loaded from the database
+  </Step>
+  
+  <Step title="Generate JWT Token">
+    A JWT token is generated with:
+    - **Standard claims**: subject (username), issued at, expiration
+    - **Custom claims**: `tenantId` (multi-tenant isolation), `role` (user role)
+  </Step>
+  
+  <Step title="Return Response">
+    The JWT token and user information are returned to the client
+  </Step>
+</Steps>
+
+## Example Request
+
+```bash
+curl -X POST https://api.invernaderos.com/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "admin@greenhousetech.com",
+    "password": "securePass123"
+  }'
+```
+
+## Example Response
+
+<CodeGroup>
+```json 200 - Success
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbkBncmVlbmhvdXNldGVjaC5jb20iLCJ0ZW5hbnRJZCI6IjU1MGU4NDAwLWUyOWItNDFkNC1hNzE2LTQ0NjY1NTQ0MDAwMCIsInJvbGUiOiJBRE1JTiIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjoxNzAwMDg2NDAwfQ.signature",
+  "type": "Bearer",
+  "username": "admin@greenhousetech.com",
+  "roles": ["ROLE_ADMIN"]
+}
+```
+
+```json 401 - Unauthorized
+{
+  "timestamp": "2025-11-16T10:30:00.000Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid credentials",
+  "path": "/api/v1/auth/login"
+}
+```
+</CodeGroup>
+
+## Status Codes
+
+<ResponseField name="200" type="OK">
+  Successfully authenticated. JWT token returned in response body.
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Invalid credentials. The username/email or password is incorrect.
+  
+  **Common causes**:
+  - Incorrect password
+  - User does not exist
+  - Account is inactive
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Validation error. Required fields are missing or empty.
+  
+  **Common causes**:
+  - Missing `username` or `password` field
+  - Empty string values
+</ResponseField>
+
+## Using the JWT Token
+
+After successful login, include the JWT token in all authenticated requests:
+
+```bash
+curl -X GET https://api.invernaderos.com/api/v1/greenhouse \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+## JWT Token Claims
+
+The JWT token contains the following custom claims:
+
+<Expandable title="Token Payload Structure">
+  ```json
+  {
+    "sub": "admin@greenhousetech.com",     // Subject (username)
+    "tenantId": "550e8400-e29b-41d4-a716-446655440000", // Multi-tenant isolation
+    "role": "ADMIN",                       // User role
+    "iat": 1700000000,                      // Issued at (Unix timestamp)
+    "exp": 1700086400                       // Expiration (Unix timestamp)
+  }
+  ```
+  
+  **tenantId**: Used for multi-tenant data isolation. All API requests automatically filter data by the user's tenant.
+  
+  **role**: Determines access permissions. Possible values: `ADMIN`, `USER`, `VIEWER`
+</Expandable>
+
+## Security Notes
+
+<Warning>
+  - JWT tokens are **stateless** and cannot be revoked before expiration
+  - Store tokens securely (e.g., HTTP-only cookies, secure storage)
+  - Never expose tokens in URLs or logs
+  - Use HTTPS in production to prevent token interception
+</Warning>
+
+## Source Code References
+
+- **Controller**: `AuthController.kt:16-25` - Login endpoint definition
+- **Service**: `AuthService.kt:19-40` - Authentication logic
+- **DTO**: `AuthDTOs.kt:10-17` - LoginRequest structure
+- **Response**: `AuthDTOs.kt:56-62` - JwtResponse structure

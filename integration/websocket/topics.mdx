@@ -1,0 +1,539 @@
+---
+title: 'WebSocket Topics'
+description: 'Available STOMP topics and message formats for real-time data streaming'
+icon: 'broadcast-tower'
+---
+
+## Overview
+
+The Invernaderos API broadcasts real-time greenhouse sensor data through WebSocket topics using the STOMP protocol. This event-driven architecture ensures all connected clients receive instant updates when new sensor readings arrive.
+
+## Available Topics
+
+### `/topic/greenhouse/messages`
+
+**Purpose**: Real-time greenhouse sensor data broadcasting
+
+**Message Frequency**: Varies based on sensor configuration (typically every 5 seconds)
+
+**Message Format**: `RealDataDto` JSON object with 22 sensor fields
+
+**Subscription Example**:
+
+```javascript
+stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+  const sensorData = JSON.parse(message.body);
+  console.log('Received:', sensorData);
+});
+```
+
+### `/topic/greenhouse/statistics`
+
+**Purpose**: Aggregated greenhouse statistics and analytics
+
+**Message Frequency**: On-demand or periodic updates
+
+**Use Case**: Dashboard summaries, trend analysis, alerts
+
+**Subscription Example**:
+
+```javascript
+stompClient.subscribe('/topic/greenhouse/statistics', function(message) {
+  const stats = JSON.parse(message.body);
+  updateDashboard(stats);
+});
+```
+
+## Message Format: RealDataDto
+
+All sensor readings are broadcast as `RealDataDto` objects containing 22 fields:
+
+<CodeGroup>
+
+```json Example Message
+{
+  "timestamp": "2025-03-03T12:30:45.123Z",
+  "TEMPERATURA INVERNADERO 01": 24.5,
+  "HUMEDAD INVERNADERO 01": 65.2,
+  "TEMPERATURA INVERNADERO 02": 23.8,
+  "HUMEDAD INVERNADERO 02": 67.1,
+  "TEMPERATURA INVERNADERO 03": 25.1,
+  "HUMEDAD INVERNADERO 03": 63.5,
+  "INVERNADERO_01_SECTOR_01": 1.0,
+  "INVERNADERO_01_SECTOR_02": 1.0,
+  "INVERNADERO_01_SECTOR_03": 0.0,
+  "INVERNADERO_01_SECTOR_04": 1.0,
+  "INVERNADERO_02_SECTOR_01": 0.0,
+  "INVERNADERO_02_SECTOR_02": 1.0,
+  "INVERNADERO_02_SECTOR_03": 1.0,
+  "INVERNADERO_02_SECTOR_04": 0.0,
+  "INVERNADERO_03_SECTOR_01": 1.0,
+  "INVERNADERO_03_SECTOR_02": 0.0,
+  "INVERNADERO_03_SECTOR_03": 1.0,
+  "INVERNADERO_03_SECTOR_04": 1.0,
+  "INVERNADERO_01_EXTRACTOR": 0.0,
+  "INVERNADERO_02_EXTRACTOR": 1.0,
+  "INVERNADERO_03_EXTRACTOR": 0.0,
+  "RESERVA": 0.0,
+  "greenhouseId": "550e8400-e29b-41d4-a716-446655440000",
+  "tenantId": "SARA"
+}
+```
+
+```typescript TypeScript Interface
+interface RealDataDto {
+  timestamp: string; // ISO 8601 format
+  
+  // Temperature readings (°C)
+  "TEMPERATURA INVERNADERO 01"?: number;
+  "TEMPERATURA INVERNADERO 02"?: number;
+  "TEMPERATURA INVERNADERO 03"?: number;
+  
+  // Humidity readings (%)
+  "HUMEDAD INVERNADERO 01"?: number;
+  "HUMEDAD INVERNADERO 02"?: number;
+  "HUMEDAD INVERNADERO 03"?: number;
+  
+  // Greenhouse 01 sectors (0=off, 1=on)
+  "INVERNADERO_01_SECTOR_01"?: number;
+  "INVERNADERO_01_SECTOR_02"?: number;
+  "INVERNADERO_01_SECTOR_03"?: number;
+  "INVERNADERO_01_SECTOR_04"?: number;
+  
+  // Greenhouse 02 sectors
+  "INVERNADERO_02_SECTOR_01"?: number;
+  "INVERNADERO_02_SECTOR_02"?: number;
+  "INVERNADERO_02_SECTOR_03"?: number;
+  "INVERNADERO_02_SECTOR_04"?: number;
+  
+  // Greenhouse 03 sectors
+  "INVERNADERO_03_SECTOR_01"?: number;
+  "INVERNADERO_03_SECTOR_02"?: number;
+  "INVERNADERO_03_SECTOR_03"?: number;
+  "INVERNADERO_03_SECTOR_04"?: number;
+  
+  // Extractors (fans)
+  "INVERNADERO_01_EXTRACTOR"?: number;
+  "INVERNADERO_02_EXTRACTOR"?: number;
+  "INVERNADERO_03_EXTRACTOR"?: number;
+  
+  // Reserve field
+  "RESERVA"?: number;
+  
+  // Identifiers
+  greenhouseId?: string;
+  tenantId?: string;
+}
+```
+
+</CodeGroup>
+
+### Field Descriptions
+
+<AccordionGroup>
+
+<Accordion title="Temperature & Humidity Fields">
+
+**Temperature Fields** (3 greenhouses):
+- `TEMPERATURA INVERNADERO 01/02/03`: Temperature readings in Celsius
+- **Range**: Typically 15-30°C
+- **Unit**: °C
+
+**Humidity Fields** (3 greenhouses):
+- `HUMEDAD INVERNADERO 01/02/03`: Relative humidity percentage
+- **Range**: 40-80%
+- **Unit**: %
+
+<Note>
+Field names use **SPACES** for temperature/humidity (e.g., `"TEMPERATURA INVERNADERO 01"`) to match the physical hardware output format.
+</Note>
+
+</Accordion>
+
+<Accordion title="Sector Control Fields">
+
+**12 Sector Fields** (4 sectors per greenhouse):
+- `INVERNADERO_01_SECTOR_01` through `INVERNADERO_03_SECTOR_04`
+- **Values**: Binary (0 = off, 1 = on)
+- **Purpose**: Irrigation or climate control zones
+
+**Naming Convention**: Uses **UNDERSCORES** (e.g., `INVERNADERO_01_SECTOR_01`)
+
+</Accordion>
+
+<Accordion title="Extractor Fields">
+
+**3 Extractor Fields** (1 per greenhouse):
+- `INVERNADERO_01_EXTRACTOR`, `INVERNADERO_02_EXTRACTOR`, `INVERNADERO_03_EXTRACTOR`
+- **Values**: Binary (0 = off, 1 = on)
+- **Purpose**: Ventilation fan status
+
+</Accordion>
+
+<Accordion title="Metadata Fields">
+
+- `timestamp`: ISO 8601 timestamp of sensor reading
+- `greenhouseId`: UUID identifier for the greenhouse
+- `tenantId`: Tenant identifier for multi-tenant setups
+- `RESERVA`: Reserved field for future use
+
+</Accordion>
+
+</AccordionGroup>
+
+## Event-Driven Broadcasting
+
+### Architecture Flow
+
+The WebSocket broadcasting uses Spring's event-driven architecture:
+
+<Steps>
+
+<Step title="MQTT Message Reception">
+Sensor data arrives via MQTT on topic `GREENHOUSE/{tenantId}`
+</Step>
+
+<Step title="Message Processing">
+`MqttMessageProcessor` processes the payload:
+- Parses JSON to `RealDataDto`
+- Caches in Redis
+- Saves to TimescaleDB
+- Publishes `GreenhouseMessageEvent`
+</Step>
+
+<Step title="Event Listener">
+`GreenhouseWebSocketHandler` listens for events:
+```kotlin
+@EventListener
+fun handleGreenhouseMessage(event: GreenhouseMessageEvent) {
+    messagingTemplate.convertAndSend(
+        "/topic/greenhouse/messages",
+        event.message
+    )
+}
+```
+</Step>
+
+<Step title="WebSocket Broadcast">
+All subscribed clients receive the message instantly
+</Step>
+
+</Steps>
+
+<Info>
+**Decoupled Design**: The MQTT processing and WebSocket broadcasting are decoupled through Spring Events, preventing MQTT message handling from blocking on WebSocket operations.
+</Info>
+
+## Subscription Examples
+
+<Tabs>
+  <Tab title="Vanilla JavaScript">
+    ```javascript
+    const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+    const stompClient = Stomp.over(socket);
+
+    stompClient.connect({}, function(frame) {
+      console.log('Connected:', frame);
+      
+      // Subscribe to sensor messages
+      stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+        const data = JSON.parse(message.body);
+        
+        // Extract specific values
+        const temp01 = data['TEMPERATURA INVERNADERO 01'];
+        const humidity01 = data['HUMEDAD INVERNADERO 01'];
+        const extractor01 = data['INVERNADERO_01_EXTRACTOR'];
+        
+        console.log(`Greenhouse 01 - Temp: ${temp01}°C, Humidity: ${humidity01}%`);
+        console.log(`Extractor: ${extractor01 === 1 ? 'ON' : 'OFF'}`);
+        
+        // Update UI
+        updateTemperatureGauge(temp01);
+        updateHumidityGauge(humidity01);
+      });
+    });
+    ```
+  </Tab>
+  <Tab title="React Component">
+    ```javascript
+    import React, { useEffect, useState } from 'react';
+    import SockJS from 'sockjs-client';
+    import { Stomp } from '@stomp/stompjs';
+
+    function GreenhouseDashboard() {
+      const [sensorData, setSensorData] = useState(null);
+      const [connected, setConnected] = useState(false);
+
+      useEffect(() => {
+        const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+        const stompClient = Stomp.over(socket);
+
+        stompClient.connect({}, () => {
+          setConnected(true);
+          console.log('WebSocket connected');
+
+          stompClient.subscribe('/topic/greenhouse/messages', (message) => {
+            const data = JSON.parse(message.body);
+            setSensorData(data);
+          });
+        });
+
+        return () => {
+          if (stompClient.connected) {
+            stompClient.disconnect();
+          }
+        };
+      }, []);
+
+      if (!connected) {
+        return <div>Connecting to WebSocket...</div>;
+      }
+
+      if (!sensorData) {
+        return <div>Waiting for sensor data...</div>;
+      }
+
+      return (
+        <div>
+          <h2>Greenhouse 01</h2>
+          <p>Temperature: {sensorData['TEMPERATURA INVERNADERO 01']}°C</p>
+          <p>Humidity: {sensorData['HUMEDAD INVERNADERO 01']}%</p>
+          <p>Extractor: {sensorData['INVERNADERO_01_EXTRACTOR'] ? 'ON' : 'OFF'}</p>
+        </div>
+      );
+    }
+
+    export default GreenhouseDashboard;
+    ```
+  </Tab>
+  <Tab title="Vue.js Component">
+    ```javascript
+    <template>
+      <div>
+        <div v-if="!connected">Connecting...</div>
+        <div v-else-if="!sensorData">Waiting for data...</div>
+        <div v-else>
+          <h2>Greenhouse Monitoring</h2>
+          <div v-for="i in 3" :key="i" class="greenhouse">
+            <h3>Greenhouse {{ i }}</h3>
+            <p>Temperature: {{ getTemp(i) }}°C</p>
+            <p>Humidity: {{ getHumidity(i) }}%</p>
+            <p>Extractor: {{ getExtractor(i) ? 'ON' : 'OFF' }}</p>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <script>
+    import SockJS from 'sockjs-client';
+    import { Stomp } from '@stomp/stompjs';
+
+    export default {
+      data() {
+        return {
+          connected: false,
+          sensorData: null,
+          stompClient: null
+        };
+      },
+      mounted() {
+        const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+        this.stompClient = Stomp.over(socket);
+
+        this.stompClient.connect({}, () => {
+          this.connected = true;
+
+          this.stompClient.subscribe('/topic/greenhouse/messages', (message) => {
+            this.sensorData = JSON.parse(message.body);
+          });
+        });
+      },
+      beforeUnmount() {
+        if (this.stompClient && this.stompClient.connected) {
+          this.stompClient.disconnect();
+        }
+      },
+      methods: {
+        getTemp(greenhouse) {
+          return this.sensorData[`TEMPERATURA INVERNADERO 0${greenhouse}`];
+        },
+        getHumidity(greenhouse) {
+          return this.sensorData[`HUMEDAD INVERNADERO 0${greenhouse}`];
+        },
+        getExtractor(greenhouse) {
+          return this.sensorData[`INVERNADERO_0${greenhouse}_EXTRACTOR`];
+        }
+      }
+    };
+    </script>
+    ```
+  </Tab>
+</Tabs>
+
+## Filtering and Processing Messages
+
+### Filter by Greenhouse ID
+
+```javascript
+stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+  const data = JSON.parse(message.body);
+  
+  // Only process data for specific greenhouse
+  if (data.greenhouseId === 'your-greenhouse-uuid') {
+    processSensorData(data);
+  }
+});
+```
+
+### Filter by Tenant ID
+
+```javascript
+const MY_TENANT_ID = 'SARA';
+
+stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+  const data = JSON.parse(message.body);
+  
+  if (data.tenantId === MY_TENANT_ID) {
+    updateDashboard(data);
+  }
+});
+```
+
+### Extract Specific Sensors
+
+```javascript
+function extractTemperatures(data) {
+  return [
+    data['TEMPERATURA INVERNADERO 01'],
+    data['TEMPERATURA INVERNADERO 02'],
+    data['TEMPERATURA INVERNADERO 03']
+  ].filter(temp => temp !== null && temp !== undefined);
+}
+
+function extractActiveSectors(data) {
+  const sectors = [];
+  for (let gh = 1; gh <= 3; gh++) {
+    for (let sector = 1; sector <= 4; sector++) {
+      const key = `INVERNADERO_0${gh}_SECTOR_0${sector}`;
+      if (data[key] === 1) {
+        sectors.push({ greenhouse: gh, sector: sector });
+      }
+    }
+  }
+  return sectors;
+}
+```
+
+## Message Handling Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Parse Safely" icon="shield-check">
+```javascript
+try {
+  const data = JSON.parse(message.body);
+  processData(data);
+} catch (error) {
+  console.error('Parse error:', error);
+}
+```
+</Card>
+
+<Card title="Handle Missing Fields" icon="circle-question">
+```javascript
+const temp = data['TEMPERATURA INVERNADERO 01'] ?? 0;
+const humidity = data['HUMEDAD INVERNADERO 01'] ?? 0;
+```
+</Card>
+
+<Card title="Throttle UI Updates" icon="gauge-high">
+```javascript
+let lastUpdate = 0;
+const updateInterval = 1000; // 1 second
+
+if (Date.now() - lastUpdate > updateInterval) {
+  updateUI(data);
+  lastUpdate = Date.now();
+}
+```
+</Card>
+
+<Card title="Buffer Data" icon="database">
+```javascript
+const dataBuffer = [];
+const bufferSize = 100;
+
+dataBuffer.push(data);
+if (dataBuffer.length > bufferSize) {
+  dataBuffer.shift();
+}
+```
+</Card>
+
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="No messages received">
+**Possible causes**:
+1. Not subscribed to correct topic: `/topic/greenhouse/messages`
+2. No sensor data being published (check MQTT broker)
+3. Connection dropped (check `connected` status)
+
+**Solution**:
+```javascript
+// Add connection status monitoring
+stompClient.onWebSocketClose = function(event) {
+  console.warn('WebSocket closed:', event);
+  attemptReconnect();
+};
+```
+</Accordion>
+
+<Accordion title="Message parsing errors">
+**Cause**: Unexpected JSON format or encoding issues
+
+**Solution**:
+```javascript
+stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+  console.log('Raw message:', message.body); // Debug raw content
+  
+  try {
+    const data = JSON.parse(message.body);
+    console.log('Parsed data:', data);
+  } catch (error) {
+    console.error('Parse failed:', error.message);
+    console.error('Message body:', message.body);
+  }
+});
+```
+</Accordion>
+
+<Accordion title="Missing field values (null/undefined)">
+**Cause**: Optional sensor fields may be null if sensor is offline or not configured
+
+**Solution**: Use null coalescing or default values
+```javascript
+const temp = data['TEMPERATURA INVERNADERO 01'] ?? null;
+if (temp === null) {
+  console.warn('Temperature sensor offline');
+} else {
+  displayTemperature(temp);
+}
+```
+</Accordion>
+
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="STOMP Setup" icon="plug" href="/integration/websocket/stomp">
+    Configure WebSocket connection
+  </Card>
+  <Card title="REST API" icon="code" href="/api-reference/greenhouse/overview">
+    Query historical sensor data
+  </Card>
+</CardGroup>

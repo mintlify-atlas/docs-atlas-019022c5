@@ -1,0 +1,341 @@
+---
+title: 'STOMP Protocol Setup'
+description: 'Configure WebSocket connections with STOMP protocol for real-time greenhouse data'
+icon: 'plug'
+---
+
+## Overview
+
+The Invernaderos API uses STOMP (Simple Text Oriented Messaging Protocol) over WebSocket to provide real-time sensor data streaming to connected clients. This setup includes SockJS fallback for browsers that don't support native WebSocket.
+
+## WebSocket Endpoints
+
+<CodeGroup>
+
+```text With SockJS Fallback
+ws://your-host:8080/ws/greenhouse
+```
+
+```text Native WebSocket Only
+ws://your-host:8080/ws/greenhouse-native
+```
+
+</CodeGroup>
+
+### Endpoint Configuration
+
+The API provides two endpoints:
+
+- **`/ws/greenhouse`** - Primary endpoint with SockJS fallback support for maximum compatibility
+- **`/ws/greenhouse-native`** - Native WebSocket endpoint without SockJS overhead
+
+<Note>
+**SockJS Fallback**: When WebSocket is unavailable, SockJS automatically falls back to HTTP-based transports (XHR streaming, XHR polling, etc.) ensuring connectivity across all environments.
+</Note>
+
+## Connection Setup
+
+<Steps>
+
+<Step title="Install Required Libraries">
+
+Add the STOMP.js and SockJS client libraries to your project:
+
+<Tabs>
+  <Tab title="CDN">
+    ```html
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+    ```
+  </Tab>
+  <Tab title="npm">
+    ```bash
+    npm install sockjs-client @stomp/stompjs
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash
+    yarn add sockjs-client @stomp/stompjs
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+
+<Step title="Initialize SockJS Connection">
+
+Create a SockJS socket instance pointing to the WebSocket endpoint:
+
+```javascript
+const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+```
+
+<Warning>
+**Protocol**: Use `http://` (not `ws://`) when connecting to SockJS endpoints. SockJS handles the protocol upgrade internally.
+</Warning>
+
+</Step>
+
+<Step title="Create STOMP Client">
+
+Wrap the SockJS socket with a STOMP client:
+
+```javascript
+const stompClient = Stomp.over(socket);
+```
+
+This creates a STOMP protocol layer on top of the WebSocket/SockJS connection.
+
+</Step>
+
+<Step title="Connect to Broker">
+
+Establish the STOMP connection with the message broker:
+
+```javascript
+stompClient.connect({}, function(frame) {
+  console.log('Connected: ' + frame);
+  
+  // Connection successful - ready to subscribe to topics
+});
+```
+
+<Tip>
+The empty object `{}` can contain connection headers like authentication tokens if needed:
+```javascript
+stompClient.connect(
+  { Authorization: 'Bearer YOUR_TOKEN' },
+  onConnectCallback,
+  onErrorCallback
+);
+```
+</Tip>
+
+</Step>
+
+</Steps>
+
+## Complete JavaScript Example
+
+<CodeGroup>
+
+```javascript Basic Connection
+const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+const stompClient = Stomp.over(socket);
+
+stompClient.connect({}, function(frame) {
+  console.log('Connected to WebSocket');
+  
+  // Subscribe to messages topic
+  stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+    const data = JSON.parse(message.body);
+    console.log('Received sensor data:', data);
+    
+    // Process sensor data
+    updateDashboard(data);
+  });
+});
+```
+
+```javascript With Error Handling
+const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+const stompClient = Stomp.over(socket);
+
+// Enable debugging (optional)
+stompClient.debug = function(str) {
+  console.log('STOMP: ' + str);
+};
+
+// Connect with error handling
+stompClient.connect(
+  {}, // Connection headers
+  function(frame) {
+    // Success callback
+    console.log('Connected: ' + frame);
+    
+    stompClient.subscribe('/topic/greenhouse/messages', function(message) {
+      try {
+        const data = JSON.parse(message.body);
+        handleSensorData(data);
+      } catch (error) {
+        console.error('Failed to parse message:', error);
+      }
+    });
+  },
+  function(error) {
+    // Error callback
+    console.error('Connection error:', error);
+    
+    // Attempt reconnection after 5 seconds
+    setTimeout(function() {
+      console.log('Attempting to reconnect...');
+      stompClient.connect({}, onConnect, onError);
+    }, 5000);
+  }
+);
+```
+
+```javascript React Hook
+import { useEffect, useState } from 'react';
+import SockJS from 'sockjs-client';
+import { Stomp } from '@stomp/stompjs';
+
+function useGreenhouseWebSocket() {
+  const [data, setData] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [client, setClient] = useState(null);
+
+  useEffect(() => {
+    const socket = new SockJS('http://localhost:8080/ws/greenhouse');
+    const stompClient = Stomp.over(socket);
+
+    stompClient.connect({}, () => {
+      console.log('WebSocket connected');
+      setConnected(true);
+
+      stompClient.subscribe('/topic/greenhouse/messages', (message) => {
+        const sensorData = JSON.parse(message.body);
+        setData(sensorData);
+      });
+    });
+
+    setClient(stompClient);
+
+    // Cleanup on unmount
+    return () => {
+      if (stompClient && stompClient.connected) {
+        stompClient.disconnect();
+      }
+    };
+  }, []);
+
+  return { data, connected, client };
+}
+
+export default useGreenhouseWebSocket;
+```
+
+</CodeGroup>
+
+## Configuration Details
+
+### Message Broker Settings
+
+The API uses an in-memory simple message broker with the following configuration:
+
+<CodeGroup>
+
+```kotlin WebSocketConfig.kt
+override fun configureMessageBroker(registry: MessageBrokerRegistry) {
+    // Enable simple in-memory broker
+    registry.enableSimpleBroker("/topic", "/queue")
+    
+    // Prefix for @MessageMapping annotated methods
+    registry.setApplicationDestinationPrefixes("/app")
+    
+    // Prefix for user-specific messages
+    registry.setUserDestinationPrefix("/user")
+}
+```
+
+</CodeGroup>
+
+### Destination Prefixes
+
+| Prefix | Purpose | Example |
+|--------|---------|----------|
+| `/topic` | Broadcast messages (one-to-many) | `/topic/greenhouse/messages` |
+| `/queue` | Point-to-point messages | `/queue/notifications` |
+| `/app` | Application-bound messages | `/app/sensor/update` |
+| `/user` | User-specific messages | `/user/alerts` |
+
+## CORS Configuration
+
+The WebSocket endpoints allow connections from all origins in development:
+
+```kotlin
+registry.addEndpoint("/ws/greenhouse")
+    .setAllowedOriginPatterns("*") // Allow all origins
+    .withSockJS()
+```
+
+<Warning>
+**Production Security**: In production environments, restrict `allowedOriginPatterns` to specific domains:
+```kotlin
+.setAllowedOriginPatterns(
+  "https://yourdomain.com",
+  "https://app.yourdomain.com"
+)
+```
+</Warning>
+
+## Connection Lifecycle
+
+<Steps>
+
+<Step title="Connection Establishment">
+Client initiates SockJS connection → Protocol negotiation → WebSocket upgrade (if available)
+</Step>
+
+<Step title="STOMP Handshake">
+STOMP CONNECT frame sent → Server responds with CONNECTED frame
+</Step>
+
+<Step title="Active Session">
+Client can subscribe to topics and send/receive messages
+</Step>
+
+<Step title="Disconnection">
+Clean disconnect with DISCONNECT frame or connection timeout
+</Step>
+
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="Connection fails with 404 error">
+Verify the endpoint URL is correct:
+- Use `http://` protocol (not `ws://`) for SockJS endpoints
+- Check that the API server is running and accessible
+- Verify the port number (default: 8080)
+</Accordion>
+
+<Accordion title="No messages received after connection">
+Ensure you've subscribed to the correct topic:
+```javascript
+stompClient.subscribe('/topic/greenhouse/messages', callback);
+```
+Check that sensor data is being published to the topic.
+</Accordion>
+
+<Accordion title="Connection drops frequently">
+- Check network stability
+- Implement reconnection logic with exponential backoff
+- Consider using heartbeats to keep connection alive:
+```javascript
+stompClient.heartbeat.outgoing = 20000; // 20 seconds
+stompClient.heartbeat.incoming = 20000;
+```
+</Accordion>
+
+<Accordion title="CORS errors in browser console">
+CORS is configured on the server side. If you encounter CORS issues:
+1. Verify the server's `allowedOriginPatterns` includes your domain
+2. Check that your frontend uses the correct protocol (http/https)
+3. Ensure credentials are not required (or properly configured)
+</Accordion>
+
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="WebSocket Topics" icon="broadcast-tower" href="/integration/websocket/topics">
+    Learn about available topics and message formats
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/greenhouse/websocket">
+    Explore WebSocket API endpoints
+  </Card>
+</CardGroup>

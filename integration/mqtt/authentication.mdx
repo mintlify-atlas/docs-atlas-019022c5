@@ -1,0 +1,686 @@
+---
+title: 'MQTT Authentication'
+description: 'Configure username/password authentication and ACL permissions for MQTT clients'
+icon: 'lock'
+---
+
+## Overview
+
+The Invernaderos API uses **username/password authentication** with **ACL-based authorization** for MQTT clients. Credentials are stored in PostgreSQL and validated by the EMQX broker.
+
+<Info>
+Authentication data is stored in the `metadata.mqtt_users` and `metadata.mqtt_acl` tables.
+</Info>
+
+## Database Schema
+
+### MqttUsers Table
+
+Stores MQTT user credentials and device metadata (`MqttUsers.kt:41-106`):
+
+```sql Schema
+CREATE TABLE metadata.mqtt_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    salt VARCHAR(255) NOT NULL,
+    device_type VARCHAR(50),  -- SENSOR, ACTUATOR, GATEWAY, API
+    greenhouse_id BIGINT REFERENCES metadata.greenhouses(id),
+    tenant_id BIGINT REFERENCES metadata.tenants(id),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_connected_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_mqtt_users_username ON metadata.mqtt_users(username);
+CREATE INDEX idx_mqtt_users_greenhouse ON metadata.mqtt_users(greenhouse_id);
+CREATE INDEX idx_mqtt_users_tenant ON metadata.mqtt_users(tenant_id);
+CREATE INDEX idx_mqtt_users_device_type ON metadata.mqtt_users(device_type);
+CREATE INDEX idx_mqtt_users_active ON metadata.mqtt_users(is_active);
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Unique user identifier |
+| `username` | VARCHAR(100) | MQTT username (unique) |
+| `password_hash` | VARCHAR(255) | Hashed password (bcrypt, pbkdf2) |
+| `salt` | VARCHAR(255) | Salt for password hashing |
+| `device_type` | VARCHAR(50) | Device category (see below) |
+| `greenhouse_id` | BIGINT | Associated greenhouse (nullable) |
+| `tenant_id` | BIGINT | Multi-tenant isolation |
+| `is_active` | BOOLEAN | Enable/disable user |
+| `last_connected_at` | TIMESTAMPTZ | Last MQTT connection timestamp |
+
+**Device Types** (`MqttUsers.kt:99-104`):
+
+```kotlin
+companion object {
+    object DeviceType {
+        const val SENSOR = "SENSOR"
+        const val ACTUATOR = "ACTUATOR"
+        const val GATEWAY = "GATEWAY"
+        const val API = "API"
+    }
+}
+```
+
+### MqttAcl Table
+
+Defines publish/subscribe permissions per user (`MqttAcl.kt:29-94`):
+
+```sql Schema
+CREATE TABLE metadata.mqtt_acl (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(100) NOT NULL,
+    permission VARCHAR(20) NOT NULL,  -- allow, deny
+    action VARCHAR(20) NOT NULL,      -- publish, subscribe, pubsub
+    topic VARCHAR(255) NOT NULL,      -- Topic pattern with wildcards
+    qos INT,                          -- NULL = any QoS
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_mqtt_acl_username ON metadata.mqtt_acl(username);
+CREATE INDEX idx_mqtt_acl_topic ON metadata.mqtt_acl(topic);
+CREATE INDEX idx_mqtt_acl_username_topic ON metadata.mqtt_acl(username, topic);
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `username` | VARCHAR(100) | MQTT username (matches `mqtt_users.username`) |
+| `permission` | VARCHAR(20) | `allow` or `deny` |
+| `action` | VARCHAR(20) | `publish`, `subscribe`, or `pubsub` |
+| `topic` | VARCHAR(255) | Topic pattern with wildcards (`#`, `+`) |
+| `qos` | INT | QoS level (0, 1, 2) or NULL for any |
+
+**Permission Constants** (`MqttAcl.kt:83-92`):
+
+```kotlin
+companion object {
+    object Permission {
+        const val ALLOW = "allow"
+        const val DENY = "deny"
+    }
+
+    object Action {
+        const val PUBLISH = "publish"
+        const val SUBSCRIBE = "subscribe"
+        const val PUBSUB = "pubsub"
+    }
+}
+```
+
+## Creating MQTT Users
+
+### Via SQL
+
+<Steps>
+  <Step title="Generate Password Hash">
+    Use bcrypt or pbkdf2 to hash the password:
+
+    ```bash
+    # Using bcrypt (recommended)
+    htpasswd -bnBC 10 "" your-password | tr -d ':'
+
+    # Using Python
+    python3 -c "import bcrypt; print(bcrypt.hashpw(b'your-password', bcrypt.gensalt()).decode())"
+    ```
+  </Step>
+
+  <Step title="Insert User">
+    ```sql
+    INSERT INTO metadata.mqtt_users (
+        username,
+        password_hash,
+        salt,
+        device_type,
+        tenant_id,
+        is_active
+    ) VALUES (
+        'sensor-greenhouse-01',
+        '$2b$10$abcdef1234567890abcdef1234567890abcdef1234567890abcd',
+        'random-salt-value',
+        'SENSOR',
+        (SELECT id FROM metadata.tenants WHERE name = 'SARA'),
+        true
+    );
+    ```
+  </Step>
+
+  <Step title="Verify User Created">
+    ```sql
+    SELECT username, device_type, is_active, created_at
+    FROM metadata.mqtt_users
+    WHERE username = 'sensor-greenhouse-01';
+    ```
+  </Step>
+</Steps>
+
+### Via API (Future Enhancement)
+
+<Note>
+The API currently does not expose an endpoint for creating MQTT users. This is managed directly in the database.
+</Note>
+
+Planned endpoint:
+```
+POST /api/mqtt/users
+Content-Type: application/json
+
+{
+  "username": "sensor-greenhouse-01",
+  "password": "your-secure-password",
+  "deviceType": "SENSOR",
+  "tenantId": "550e8400-e29b-41d4-a716-446655440000",
+  "greenhouseId": 1
+}
+```
+
+## Configuring ACL Permissions
+
+### Permission Patterns
+
+ACL rules use MQTT topic wildcards:
+
+- `#` - Multi-level wildcard (matches any number of levels)
+- `+` - Single-level wildcard (matches one level)
+
+**Examples:**
+
+| Topic Pattern | Matches | Does NOT Match |
+|---------------|---------|----------------|
+| `GREENHOUSE/#` | `GREENHOUSE/SARA`<br/>`GREENHOUSE/SARA/sensor/01` | `greenhouse/sara` (case-sensitive) |
+| `GREENHOUSE/+` | `GREENHOUSE/SARA`<br/>`GREENHOUSE/001` | `GREENHOUSE/SARA/sensor` (too deep) |
+| `greenhouse/+/sensors/#` | `greenhouse/1/sensors/temp`<br/>`greenhouse/2/sensors/humidity/01` | `greenhouse/sensors` (missing level) |
+| `GREENHOUSE/SARA/#` | `GREENHOUSE/SARA`<br/>`GREENHOUSE/SARA/anything` | `GREENHOUSE/001` (wrong tenant) |
+
+### Common ACL Configurations
+
+<Tabs>
+  <Tab title="Sensor Device">
+    **Scenario:** Sensor publishes data to `GREENHOUSE/{tenantId}`, subscribes to commands.
+
+    ```sql
+    -- Allow publishing sensor data to tenant topic
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('sensor-greenhouse-01', 'allow', 'publish', 'GREENHOUSE/SARA');
+
+    -- Allow subscribing to sensor commands
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('sensor-greenhouse-01', 'allow', 'subscribe', 'greenhouse/1/sensors/+/commands');
+
+    -- Deny all other topics
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('sensor-greenhouse-01', 'deny', 'pubsub', '#');
+    ```
+
+    **Result:**
+    - ✅ Can publish to `GREENHOUSE/SARA`
+    - ✅ Can subscribe to `greenhouse/1/sensors/temp/commands`
+    - ❌ Cannot publish to other tenants
+    - ❌ Cannot subscribe to system topics
+  </Tab>
+
+  <Tab title="Gateway Device">
+    **Scenario:** Gateway aggregates data from multiple sensors, publishes to multiple topics.
+
+    ```sql
+    -- Allow publishing to all tenant topics
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('gateway-01', 'allow', 'publish', 'GREENHOUSE/#');
+
+    -- Allow subscribing to sensor data for aggregation
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('gateway-01', 'allow', 'subscribe', 'greenhouse/+/sensors/#');
+
+    -- Allow subscribing to actuator status
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('gateway-01', 'allow', 'subscribe', 'greenhouse/+/actuators/#');
+    ```
+
+    **Result:**
+    - ✅ Can publish to any tenant (`GREENHOUSE/SARA`, `GREENHOUSE/001`, etc.)
+    - ✅ Can subscribe to all sensors and actuators
+    - ✅ Can aggregate multi-tenant data
+  </Tab>
+
+  <Tab title="Actuator Device">
+    **Scenario:** Actuator subscribes to commands, publishes status updates.
+
+    ```sql
+    -- Allow subscribing to actuator commands
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('actuator-01', 'allow', 'subscribe', 'greenhouse/1/actuators/+/commands');
+
+    -- Allow publishing status updates
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('actuator-01', 'allow', 'publish', 'greenhouse/1/actuators/+/status');
+
+    -- Deny all other topics
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('actuator-01', 'deny', 'pubsub', '#');
+    ```
+
+    **Result:**
+    - ✅ Can subscribe to `greenhouse/1/actuators/extractor/commands`
+    - ✅ Can publish to `greenhouse/1/actuators/extractor/status`
+    - ❌ Cannot publish to sensor topics
+    - ❌ Cannot subscribe to other greenhouses
+  </Tab>
+
+  <Tab title="API Client (Admin)">
+    **Scenario:** API server needs full access to all topics.
+
+    ```sql
+    -- Allow full publish/subscribe access
+    INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+    VALUES ('api-admin', 'allow', 'pubsub', '#');
+    ```
+
+    **Result:**
+    - ✅ Can publish to any topic
+    - ✅ Can subscribe to any topic
+    - ⚠️ Use with caution (admin only)
+  </Tab>
+</Tabs>
+
+### ACL Priority Rules
+
+**EMQX ACL Evaluation Order:**
+
+1. **Specific rules first** (exact topic match)
+2. **Wildcard rules second** (`+`, `#`)
+3. **Deny rules override allow rules** (if both match)
+4. **Default deny** (if no rules match)
+
+**Example:**
+
+```sql
+-- Rule 1: Allow publish to GREENHOUSE/SARA
+INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+VALUES ('sensor-01', 'allow', 'publish', 'GREENHOUSE/SARA');
+
+-- Rule 2: Deny all other GREENHOUSE topics
+INSERT INTO metadata.mqtt_acl (username, permission, action, topic)
+VALUES ('sensor-01', 'deny', 'publish', 'GREENHOUSE/#');
+```
+
+**Evaluation:**
+- Publishing to `GREENHOUSE/SARA` → ✅ **ALLOW** (Rule 1 matches first)
+- Publishing to `GREENHOUSE/001` → ❌ **DENY** (Rule 2 matches)
+- Publishing to `system/events` → ❌ **DENY** (default deny, no rules match)
+
+## Testing Authentication
+
+### Using mosquitto_pub/sub
+
+<Tabs>
+  <Tab title="Valid Credentials">
+    ```bash
+    # Publish with valid credentials
+    mosquitto_pub \
+      -h your-broker \
+      -p 1883 \
+      -u sensor-greenhouse-01 \
+      -P your-password \
+      -t GREENHOUSE/SARA \
+      -m '{"TEMPERATURA INVERNADERO 01": 25.5}'
+
+    # Success (no output)
+    ```
+  </Tab>
+
+  <Tab title="Invalid Credentials">
+    ```bash
+    # Publish with wrong password
+    mosquitto_pub \
+      -h your-broker \
+      -p 1883 \
+      -u sensor-greenhouse-01 \
+      -P wrong-password \
+      -t GREENHOUSE/SARA \
+      -m '{"TEMPERATURA INVERNADERO 01": 25.5}'
+
+    # Output:
+    # Connection error: Connection Refused: bad user name or password.
+    ```
+  </Tab>
+
+  <Tab title="ACL Denied">
+    ```bash
+    # Publish to topic without permission
+    mosquitto_pub \
+      -h your-broker \
+      -p 1883 \
+      -u sensor-greenhouse-01 \
+      -P your-password \
+      -t GREENHOUSE/RESTRICTED \
+      -m '{"data": "test"}'
+
+    # Output:
+    # Connection error: Not authorized.
+    ```
+  </Tab>
+</Tabs>
+
+### Using MQTT Explorer
+
+<Steps>
+  <Step title="Open MQTT Explorer">
+    Download from [mqtt-explorer.com](http://mqtt-explorer.com/)
+  </Step>
+
+  <Step title="Create Connection">
+    - **Host:** `your-broker`
+    - **Port:** `1883` (or `8883` for TLS)
+    - **Username:** `sensor-greenhouse-01`
+    - **Password:** `your-password`
+    - Click **Connect**
+  </Step>
+
+  <Step title="Test Publishing">
+    1. Navigate to **Publish** tab
+    2. Enter topic: `GREENHOUSE/SARA`
+    3. Enter payload: `{"TEMPERATURA INVERNADERO 01": 25.5}`
+    4. Click **Publish**
+    5. Check for success or error message
+  </Step>
+
+  <Step title="Test Subscribing">
+    1. Navigate to **Subscribe** tab
+    2. Enter topic: `GREENHOUSE/#`
+    3. Click **Subscribe**
+    4. If ACL allows, you'll see messages in topic tree
+  </Step>
+</Steps>
+
+## Managing Credentials
+
+### Updating Passwords
+
+```sql Update Password
+-- Generate new password hash
+-- Example: bcrypt hash of "new-password"
+UPDATE metadata.mqtt_users
+SET password_hash = '$2b$10$newhashabcdef1234567890abcdef1234567890abcd',
+    updated_at = NOW()
+WHERE username = 'sensor-greenhouse-01';
+```
+
+### Disabling Users
+
+```sql Disable User
+-- Disable user (prevents MQTT login)
+UPDATE metadata.mqtt_users
+SET is_active = false,
+    updated_at = NOW()
+WHERE username = 'sensor-greenhouse-01';
+
+-- Re-enable user
+UPDATE metadata.mqtt_users
+SET is_active = true,
+    updated_at = NOW()
+WHERE username = 'sensor-greenhouse-01';
+```
+
+### Deleting Users
+
+```sql Delete User
+-- Delete ACL rules first (foreign key constraint)
+DELETE FROM metadata.mqtt_acl
+WHERE username = 'sensor-greenhouse-01';
+
+-- Delete user
+DELETE FROM metadata.mqtt_users
+WHERE username = 'sensor-greenhouse-01';
+```
+
+### Tracking Last Connection
+
+```sql View Connection History
+-- View all users with last connection time
+SELECT username, device_type, last_connected_at,
+       NOW() - last_connected_at AS time_since_last_connection
+FROM metadata.mqtt_users
+WHERE is_active = true
+ORDER BY last_connected_at DESC NULLS LAST;
+
+-- Find inactive devices (not connected in 7 days)
+SELECT username, device_type, last_connected_at
+FROM metadata.mqtt_users
+WHERE is_active = true
+  AND (last_connected_at IS NULL OR last_connected_at < NOW() - INTERVAL '7 days');
+```
+
+<Note>
+EMQX can update `last_connected_at` via webhook or auth plugin. Configure EMQX to call API endpoint on client connect.
+</Note>
+
+## Security Best Practices
+
+<Warning>
+**CRITICAL:** Follow these security guidelines for production deployments.
+</Warning>
+
+### Password Security
+
+<Steps>
+  <Step title="Use Strong Password Hashing">
+    - **Recommended:** bcrypt with cost factor 10+
+    - **Alternative:** PBKDF2 with 100,000+ iterations
+    - **Avoid:** Plain text, MD5, SHA1 (insecure)
+
+    ```bash
+    # Generate bcrypt hash (cost 12 for production)
+    htpasswd -bnBC 12 "" your-secure-password | tr -d ':'
+    ```
+  </Step>
+
+  <Step title="Generate Strong Passwords">
+    - **Length:** Minimum 20 characters
+    - **Complexity:** Mix of letters, numbers, symbols
+    - **Avoid:** Dictionary words, device IDs, predictable patterns
+
+    ```bash
+    # Generate random password
+    openssl rand -base64 32
+    ```
+  </Step>
+
+  <Step title="Rotate Credentials Regularly">
+    - **Production:** Every 90 days
+    - **Development:** Every 180 days
+    - **Compromised:** Immediately
+
+    ```sql
+    -- Track password age
+    SELECT username, updated_at,
+           NOW() - updated_at AS password_age
+    FROM metadata.mqtt_users
+    WHERE NOW() - updated_at > INTERVAL '90 days';
+    ```
+  </Step>
+</Steps>
+
+### ACL Best Practices
+
+1. **Principle of Least Privilege**
+   - Grant minimum necessary permissions
+   - Use specific topic patterns (not `#` for all)
+   - Separate read and write permissions
+
+2. **Default Deny**
+   - Add explicit deny rule as last rule: `('username', 'deny', 'pubsub', '#')`
+   - EMQX denies by default, but explicit is safer
+
+3. **Multi-Tenant Isolation**
+   - Restrict sensors to their tenant: `GREENHOUSE/{tenantId}` only
+   - Use `greenhouse_id` and `tenant_id` in ACL logic
+   - Never allow cross-tenant publishing
+
+4. **Audit ACL Changes**
+   - Log all ACL modifications
+   - Review permissions quarterly
+   - Alert on wildcard `#` permissions
+
+### TLS/SSL (Production)
+
+**Always use encrypted connections in production:**
+
+```yaml EMQX Configuration
+listeners:
+  ssl:
+    external:
+      bind: "0.0.0.0:8883"
+      ssl_options:
+        cacertfile: "/etc/emqx/certs/ca.pem"
+        certfile: "/etc/emqx/certs/server.crt"
+        keyfile: "/etc/emqx/certs/server.key"
+        verify: verify_peer
+        fail_if_no_peer_cert: true
+```
+
+**Client Configuration:**
+
+```kotlin Kotlin TLS
+import javax.net.ssl.SSLContext
+
+val sslContext = SSLContext.getInstance("TLS")
+val options = MqttConnectOptions().apply {
+    socketFactory = sslContext.socketFactory
+    serverURIs = arrayOf("ssl://your-broker:8883")
+}
+```
+
+### Rate Limiting
+
+**Prevent abuse with connection/message rate limits:**
+
+```yaml EMQX Limits
+listeners:
+  tcp:
+    external:
+      max_connections: 1024
+      max_conn_rate: 1000  # Connections per second
+  
+zone:
+  external:
+    publish_limit: "100/s"  # Max 100 messages per second per client
+    subscribe_limit: "10/s"
+```
+
+## Monitoring & Auditing
+
+### Active Connections
+
+```sql View Active MQTT Clients
+-- View all users with recent activity
+SELECT u.username, u.device_type, u.tenant_id,
+       u.last_connected_at,
+       COUNT(a.id) AS acl_rules
+FROM metadata.mqtt_users u
+LEFT JOIN metadata.mqtt_acl a ON u.username = a.username
+WHERE u.is_active = true
+GROUP BY u.username, u.device_type, u.tenant_id, u.last_connected_at
+ORDER BY u.last_connected_at DESC NULLS LAST;
+```
+
+### Failed Authentication Attempts
+
+<Note>
+Configure EMQX to log failed auth attempts to external system (Elasticsearch, Loki, etc.)
+</Note>
+
+**EMQX Webhook Configuration:**
+
+```yaml EMQX Webhook
+webhooks:
+  - name: auth_failed_webhook
+    url: "https://your-api.com/api/mqtt/auth/failed"
+    events:
+      - "client.authenticate.failed"
+    headers:
+      Authorization: "Bearer your-api-token"
+```
+
+### ACL Audit Queries
+
+```sql ACL Audit Queries
+-- Find users with wildcard publish permissions
+SELECT username, topic, permission, action
+FROM metadata.mqtt_acl
+WHERE topic LIKE '%#%'
+  AND action IN ('publish', 'pubsub')
+  AND permission = 'allow';
+
+-- Find users with cross-tenant access
+SELECT u.username, u.tenant_id, a.topic
+FROM metadata.mqtt_users u
+JOIN metadata.mqtt_acl a ON u.username = a.username
+WHERE a.topic LIKE 'GREENHOUSE/%'
+  AND a.topic NOT LIKE CONCAT('GREENHOUSE/', (SELECT name FROM metadata.tenants WHERE id = u.tenant_id), '%');
+
+-- Count ACL rules per user
+SELECT username, COUNT(*) AS rule_count
+FROM metadata.mqtt_acl
+GROUP BY username
+ORDER BY rule_count DESC;
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection Refused (Error 5)">
+    **Cause:** Invalid username or password
+
+    **Solution:**
+    1. Verify username exists: `SELECT * FROM metadata.mqtt_users WHERE username = 'your-username'`
+    2. Check `is_active = true`
+    3. Regenerate password hash and update database
+    4. Test with mosquitto_sub: `mosquitto_sub -h broker -u username -P password -t "#"`
+  </Accordion>
+
+  <Accordion title="Not Authorized (Error 7)">
+    **Cause:** ACL denies publish/subscribe to topic
+
+    **Solution:**
+    1. Check ACL rules: `SELECT * FROM metadata.mqtt_acl WHERE username = 'your-username'`
+    2. Verify topic pattern matches intended topic
+    3. Check permission is `allow` and action matches (`publish`, `subscribe`)
+    4. Add explicit allow rule if missing
+  </Accordion>
+
+  <Accordion title="User Exists But Cannot Connect">
+    **Cause:** User is disabled or password hash mismatch
+
+    **Solution:**
+    1. Check active status: `SELECT is_active FROM metadata.mqtt_users WHERE username = 'your-username'`
+    2. Re-enable if disabled: `UPDATE metadata.mqtt_users SET is_active = true WHERE username = 'your-username'`
+    3. Regenerate password hash with correct algorithm (bcrypt)
+  </Accordion>
+
+  <Accordion title="ACL Rules Not Applied">
+    **Cause:** EMQX not configured to query PostgreSQL ACL
+
+    **Solution:**
+    1. Verify EMQX PostgreSQL auth plugin enabled
+    2. Check EMQX logs for database connection errors
+    3. Restart EMQX after ACL changes: `systemctl restart emqx`
+    4. Test with EMQX CLI: `emqx_ctl acl reload`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Setup MQTT Client" icon="plug" href="./setup">
+    Configure client libraries and connection
+  </Card>
+  <Card title="Message Format" icon="code" href="./message-format">
+    Learn the JSON payload structure
+  </Card>
+</CardGroup>

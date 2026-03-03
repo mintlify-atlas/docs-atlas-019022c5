@@ -1,80 +1,627 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Get the Invernaderos API running locally in under 5 minutes with Docker Compose"
 ---
 
-## Get started in three steps
+# Quick Start Guide
 
-Get your documentation site running locally and make your first customization.
+Get your IoT greenhouse monitoring system up and running in **less than 5 minutes** using Docker Compose.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+Before you begin, ensure you have the following installed:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Docker" icon="docker">
+    Docker Engine **v20.10+**
+    
+    [Download Docker](https://docs.docker.com/get-docker/)
+  </Card>
+  <Card title="Docker Compose" icon="layer-group">
+    Docker Compose **v2.0+**
+    
+    (Included with Docker Desktop)
+  </Card>
 </CardGroup>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  **Java 21 is optional** - Only needed for local development without Docker. The Docker image includes the JRE.
 </Note>
+
+## Step 1: Clone the Repository
+
+<Steps>
+  <Step title="Clone from GitHub">
+    ```bash
+    git clone https://github.com/apptolast/InvernaderosAPI.git
+    cd InvernaderosAPI
+    ```
+  </Step>
+</Steps>
+
+## Step 2: Configure Environment Variables
+
+The system requires secure passwords for database and MQTT connections.
+
+<Steps>
+  <Step title="Copy the example environment file">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+  
+  <Step title="Generate secure passwords">
+    Use OpenSSL to generate strong passwords:
+    
+    ```bash
+    # Generate 5 random passwords
+    openssl rand -base64 32
+    openssl rand -base64 32
+    openssl rand -base64 32
+    openssl rand -base64 32
+    openssl rand -base64 32
+    ```
+  </Step>
+  
+  <Step title="Edit the .env file">
+    Open `.env` in your text editor and replace placeholders:
+    
+    ```bash .env
+    # TimescaleDB (Time-series Database)
+    TIMESCALE_DB_NAME=greenhouse_timeseries
+    TIMESCALE_USER=admin
+    TIMESCALE_PASSWORD=<paste_generated_password_1>
+    
+    # PostgreSQL Metadata Database
+    METADATA_DB_NAME=greenhouse_metadata
+    METADATA_USER=admin
+    METADATA_PASSWORD=<paste_generated_password_2>
+    
+    # Redis Cache
+    REDIS_HOST=redis
+    REDIS_PORT=6379
+    REDIS_PASSWORD=<paste_generated_password_3>
+    
+    # MQTT Broker (EMQX)
+    MQTT_BROKER_URL=tcp://emqx:1883
+    MQTT_USERNAME=mqtt_user
+    MQTT_PASSWORD=<paste_generated_password_4>
+    MQTT_CLIENT_ID_PREFIX=api_local_001
+    
+    # EMQX Dashboard
+    EMQX_DASHBOARD_USERNAME=admin
+    EMQX_DASHBOARD_PASSWORD=<paste_generated_password_5>
+    
+    # Spring Boot
+    SPRING_PROFILES_ACTIVE=local
+    JAVA_OPTS=-Xms256m -Xmx512m
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  **Never use default passwords in production!** Generate unique, strong passwords for each service and rotate them regularly.
+</Warning>
+
+## Step 3: Configure Application Settings
+
+<Steps>
+  <Step title="Copy application configuration">
+    ```bash
+    cp application-local.yaml.example application-local.yaml
+    ```
+    
+    This file configures the Spring Boot application. The default settings are optimized for local development.
+  </Step>
+</Steps>
+
+<Info>
+  The `application-local.yaml` file is **volume-mounted** into the Docker container at `/app/config/application.yaml`. You can modify settings without rebuilding the image.
+</Info>
+
+## Step 4: Start All Services
+
+<Steps>
+  <Step title="Start with Docker Compose">
+    ```bash
+    docker-compose up -d
+    ```
+    
+    This command will:
+    - Pull required Docker images (TimescaleDB, PostgreSQL, Redis, EMQX)
+    - Build the Spring Boot API image
+    - Start all 5 services in detached mode
+    - Create Docker networks and volumes
+  </Step>
+  
+  <Step title="Monitor startup logs">
+    ```bash
+    docker-compose logs -f api
+    ```
+    
+    Wait for this message:
+    ```
+    Started InvernaderosApplication in X.XXX seconds
+    ```
+    
+    Press `Ctrl+C` to stop following logs.
+  </Step>
+  
+  <Step title="Verify all services are running">
+    ```bash
+    docker-compose ps
+    ```
+    
+    Expected output:
+    ```
+    NAME                         STATUS
+    invernaderos-api             Up (healthy)
+    invernaderos-emqx            Up (healthy)
+    invernaderos-postgres        Up (healthy)
+    invernaderos-redis           Up (healthy)
+    invernaderos-timescaledb     Up (healthy)
+    ```
+  </Step>
+</Steps>
+
+## Step 5: Verify API is Running
+
+<Steps>
+  <Step title="Health check endpoint">
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+    
+    Expected response:
+    ```json
+    {
+      "status": "UP"
+    }
+    ```
+  </Step>
+  
+  <Step title="Check cache status">
+    ```bash
+    curl http://localhost:8080/api/v1/greenhouse/cache/info
+    ```
+    
+    Expected response:
+    ```json
+    {
+      "totalMessages": 0,
+      "ttlSeconds": 86400,
+      "maxCapacity": 1000,
+      "utilizationPercentage": 0.0,
+      "cacheType": "Redis Sorted Set"
+    }
+    ```
+  </Step>
+</Steps>
+
+## Step 6: Explore the API
+
+Open your browser and access the interactive API documentation:
+
+<CardGroup cols={2}>
+  <Card title="Swagger UI" icon="browser" href="http://localhost:8080/swagger-ui.html">
+    Interactive API explorer with try-it-out functionality
+  </Card>
+  <Card title="OpenAPI Spec" icon="file-code" href="http://localhost:8080/v3/api-docs">
+    OpenAPI 3.0 JSON specification
+  </Card>
+  <Card title="EMQX Dashboard" icon="chart-line" href="http://localhost:18083">
+    MQTT broker management (login with EMQX credentials)
+  </Card>
+  <Card title="Actuator" icon="stethoscope" href="http://localhost:8080/actuator">
+    Health, metrics, and monitoring endpoints
+  </Card>
+</CardGroup>
+
+## Step 7: Test with Sample Data
+
+Now let's send a test MQTT message to verify the system is working.
+
+<Tabs>
+  <Tab title="Using mosquitto_pub (Recommended)">
+    Install mosquitto-clients:
+    
+    ```bash
+    # macOS
+    brew install mosquitto
+    
+    # Ubuntu/Debian
+    sudo apt-get install mosquitto-clients
+    
+    # Windows (use WSL or download from mosquitto.org)
+    ```
+    
+    Publish a test message:
+    
+    ```bash
+    mosquitto_pub -h localhost -p 1883 \
+      -u mqtt_user -P <your_mqtt_password> \
+      -t "GREENHOUSE/TEST" \
+      -m '{
+        "TEMPERATURA INVERNADERO 01": 24.5,
+        "HUMEDAD INVERNADERO 01": 65.3,
+        "TEMPERATURA INVERNADERO 02": 23.8,
+        "HUMEDAD INVERNADERO 02": 68.2,
+        "TEMPERATURA INVERNADERO 03": 25.1,
+        "HUMEDAD INVERNADERO 03": 64.7,
+        "INVERNADERO_01_SECTOR_01": 1.0,
+        "INVERNADERO_01_SECTOR_02": 0.0,
+        "INVERNADERO_01_SECTOR_03": 1.0,
+        "INVERNADERO_01_SECTOR_04": 0.0,
+        "INVERNADERO_02_SECTOR_01": 1.0,
+        "INVERNADERO_02_SECTOR_02": 1.0,
+        "INVERNADERO_02_SECTOR_03": 0.0,
+        "INVERNADERO_02_SECTOR_04": 1.0,
+        "INVERNADERO_03_SECTOR_01": 0.0,
+        "INVERNADERO_03_SECTOR_02": 1.0,
+        "INVERNADERO_03_SECTOR_03": 1.0,
+        "INVERNADERO_03_SECTOR_04": 0.0,
+        "INVERNADERO_01_EXTRACTOR": 850.5,
+        "INVERNADERO_02_EXTRACTOR": 920.3,
+        "INVERNADERO_03_EXTRACTOR": 780.2,
+        "RESERVA": 0.0
+      }'
+    ```
+  </Tab>
+  
+  <Tab title="Using Python (MQTT)">
+    Install paho-mqtt:
+    
+    ```bash
+    pip install paho-mqtt
+    ```
+    
+    Create `test_mqtt.py`:
+    
+    ```python
+    import paho.mqtt.client as mqtt
+    import json
+    
+    # MQTT Configuration
+    broker = "localhost"
+    port = 1883
+    username = "mqtt_user"
+    password = "your_mqtt_password"  # From .env
+    topic = "GREENHOUSE/TEST"
+    
+    # Sample sensor data
+    payload = {
+        "TEMPERATURA INVERNADERO 01": 24.5,
+        "HUMEDAD INVERNADERO 01": 65.3,
+        "TEMPERATURA INVERNADERO 02": 23.8,
+        "HUMEDAD INVERNADERO 02": 68.2,
+        "TEMPERATURA INVERNADERO 03": 25.1,
+        "HUMEDAD INVERNADERO 03": 64.7,
+        "INVERNADERO_01_SECTOR_01": 1.0,
+        "INVERNADERO_01_SECTOR_02": 0.0,
+        "INVERNADERO_01_SECTOR_03": 1.0,
+        "INVERNADERO_01_SECTOR_04": 0.0,
+        "INVERNADERO_02_SECTOR_01": 1.0,
+        "INVERNADERO_02_SECTOR_02": 1.0,
+        "INVERNADERO_02_SECTOR_03": 0.0,
+        "INVERNADERO_02_SECTOR_04": 1.0,
+        "INVERNADERO_03_SECTOR_01": 0.0,
+        "INVERNADERO_03_SECTOR_02": 1.0,
+        "INVERNADERO_03_SECTOR_03": 1.0,
+        "INVERNADERO_03_SECTOR_04": 0.0,
+        "INVERNADERO_01_EXTRACTOR": 850.5,
+        "INVERNADERO_02_EXTRACTOR": 920.3,
+        "INVERNADERO_03_EXTRACTOR": 780.2,
+        "RESERVA": 0.0
+    }
+    
+    # Connect and publish
+    client = mqtt.Client()
+    client.username_pw_set(username, password)
+    client.connect(broker, port, 60)
+    client.publish(topic, json.dumps(payload))
+    client.disconnect()
+    
+    print("✅ Message published successfully!")
+    ```
+    
+    Run the script:
+    ```bash
+    python test_mqtt.py
+    ```
+  </Tab>
+  
+  <Tab title="Using curl (REST API)">
+    Query recent messages via REST:
+    
+    ```bash
+    curl http://localhost:8080/api/v1/greenhouse/messages/recent?tenantId=TEST&limit=10
+    ```
+    
+    Expected response:
+    ```json
+    [
+      {
+        "timestamp": "2025-03-03T21:30:00Z",
+        "TEMPERATURA INVERNADERO 01": 24.5,
+        "HUMEDAD INVERNADERO 01": 65.3,
+        "TEMPERATURA INVERNADERO 02": 23.8,
+        "HUMEDAD INVERNADERO 02": 68.2,
+        // ... all 22 fields
+        "greenhouseId": null,
+        "tenantId": "TEST"
+      }
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  The API automatically processes MQTT messages, caches them in Redis, saves to TimescaleDB, and broadcasts via WebSocket to connected clients.
+</Info>
+
+## Docker Compose Services
+
+The `docker-compose.yaml` defines 5 services:
+
+| Service | Container Name | Ports | Purpose |
+|---------|---------------|-------|----------|
+| **api** | `invernaderos-api` | 8080 | Spring Boot API |
+| **timescaledb** | `invernaderos-timescaledb` | 5432 | Time-series database |
+| **postgresql-metadata** | `invernaderos-postgres-metadata` | 5433→5432 | Metadata database |
+| **redis** | `invernaderos-redis` | 6379 | Cache |
+| **emqx** | `invernaderos-emqx` | 1883, 8083, 18083 | MQTT broker |
+
+<Accordion title="View complete docker-compose.yaml">
+  ```yaml
+  version: '3.8'
+  
+  services:
+    # TimescaleDB - Time-series Database
+    timescaledb:
+      image: timescale/timescaledb:latest-pg16
+      container_name: invernaderos-timescaledb
+      environment:
+        POSTGRES_DB: ${TIMESCALE_DB_NAME:-greenhouse_timeseries}
+        POSTGRES_USER: ${TIMESCALE_USER:-admin}
+        POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD}
+      ports:
+        - "5432:5432"
+      volumes:
+        - timescaledb_data:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER}"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+    
+    # PostgreSQL - Metadata Database
+    postgresql-metadata:
+      image: postgres:16-alpine
+      container_name: invernaderos-postgres-metadata
+      environment:
+        POSTGRES_DB: ${METADATA_DB_NAME:-greenhouse_metadata}
+        POSTGRES_USER: ${METADATA_USER:-admin}
+        POSTGRES_PASSWORD: ${METADATA_PASSWORD}
+      ports:
+        - "5433:5432"
+      volumes:
+        - postgres_metadata_data:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U ${METADATA_USER}"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+    
+    # Redis - Cache
+    redis:
+      image: redis:7-alpine
+      container_name: invernaderos-redis
+      command: redis-server --requirepass ${REDIS_PASSWORD}
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis_data:/data
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 10s
+        timeout: 3s
+        retries: 5
+    
+    # EMQX - MQTT Broker
+    emqx:
+      image: emqx/emqx:latest
+      container_name: invernaderos-emqx
+      environment:
+        EMQX_DASHBOARD__DEFAULT_USERNAME: ${EMQX_DASHBOARD_USERNAME:-admin}
+        EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD}
+      ports:
+        - "1883:1883"      # MQTT
+        - "8083:8083"      # MQTT/WebSocket
+        - "18083:18083"    # Dashboard
+      healthcheck:
+        test: ["CMD", "/opt/emqx/bin/emqx", "ping"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+    
+    # Invernaderos API - Spring Boot Application
+    api:
+      build:
+        context: .
+        dockerfile: Dockerfile
+      container_name: invernaderos-api
+      environment:
+        SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+        TIMESCALE_PASSWORD: ${TIMESCALE_PASSWORD}
+        METADATA_PASSWORD: ${METADATA_PASSWORD}
+        REDIS_HOST: redis
+        REDIS_PORT: 6379
+        REDIS_PASSWORD: ${REDIS_PASSWORD}
+        MQTT_BROKER_URL: ${MQTT_BROKER_URL:-tcp://emqx:1883}
+        MQTT_USERNAME: ${MQTT_USERNAME}
+        MQTT_PASSWORD: ${MQTT_PASSWORD}
+        MQTT_CLIENT_ID_PREFIX: ${MQTT_CLIENT_ID_PREFIX:-api_local_001}
+      ports:
+        - "8080:8080"
+      volumes:
+        - ./application-local.yaml:/app/config/application.yaml:ro
+      depends_on:
+        timescaledb:
+          condition: service_healthy
+        postgresql-metadata:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
+        emqx:
+          condition: service_healthy
+      healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+        interval: 30s
+        timeout: 3s
+        retries: 3
+        start_period: 60s
+  
+  volumes:
+    timescaledb_data:
+    postgres_metadata_data:
+    redis_data:
+  ```
+</Accordion>
+
+## Common Commands
+
+<CodeGroup>
+```bash View Logs
+# Follow API logs
+docker-compose logs -f api
+
+# View all logs
+docker-compose logs
+
+# Last 100 lines
+docker-compose logs --tail=100 api
+```
+
+```bash Service Management
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (⚠️ deletes all data)
+docker-compose down -v
+
+# Restart a service
+docker-compose restart api
+
+# Rebuild and restart
+docker-compose up -d --build api
+```
+
+```bash Database Access
+# Connect to TimescaleDB
+docker exec -it invernaderos-timescaledb \
+  psql -U admin -d greenhouse_timeseries
+
+# Connect to PostgreSQL
+docker exec -it invernaderos-postgres-metadata \
+  psql -U admin -d greenhouse_metadata
+
+# Connect to Redis
+docker exec -it invernaderos-redis \
+  redis-cli -a <REDIS_PASSWORD>
+```
+</CodeGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Services won't start">
+    **Check if ports are already in use:**
+    
+    ```bash
+    lsof -i :8080  # API
+    lsof -i :5432  # TimescaleDB
+    lsof -i :5433  # PostgreSQL
+    lsof -i :6379  # Redis
+    lsof -i :1883  # MQTT
+    ```
+    
+    **Stop conflicting services or modify ports in docker-compose.yaml**
+  </Accordion>
+  
+  <Accordion title="Database connection errors">
+    **Check environment variables:**
+    
+    ```bash
+    docker-compose config
+    ```
+    
+    **Verify passwords match in .env and application-local.yaml**
+    
+    **Reset databases (⚠️ deletes all data):**
+    
+    ```bash
+    docker-compose down -v
+    docker-compose up -d
+    ```
+  </Accordion>
+  
+  <Accordion title="MQTT messages not received">
+    **Check MQTT credentials in .env:**
+    
+    ```bash
+    cat .env | grep MQTT
+    ```
+    
+    **Test MQTT connection:**
+    
+    ```bash
+    mosquitto_pub -h localhost -p 1883 \
+      -u mqtt_user -P <password> \
+      -t "test" -m "hello"
+    ```
+    
+    **View EMQX logs:**
+    
+    ```bash
+    docker-compose logs emqx
+    ```
+  </Accordion>
+  
+  <Accordion title="API returns 500 errors">
+    **View API logs:**
+    
+    ```bash
+    docker-compose logs api --tail=100
+    ```
+    
+    **Check health status:**
+    
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+    
+    **Verify all services are healthy:**
+    
+    ```bash
+    docker-compose ps
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={3}>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand the system design and components
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference">
+    Explore all REST endpoints
+  </Card>
+  <Card title="WebSocket" icon="satellite-dish" href="/websocket">
+    Connect to real-time data stream
+  </Card>
+</CardGroup>
+
+---
+
+**Congratulations!** Your Invernaderos API is now running. You can start sending sensor data via MQTT and querying it via REST or WebSocket.

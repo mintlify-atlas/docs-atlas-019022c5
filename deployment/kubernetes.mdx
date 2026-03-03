@@ -1,0 +1,932 @@
+---
+title: 'Kubernetes Deployment'
+description: 'Deploy the Invernaderos API to production using Kubernetes with high availability'
+icon: 'dharmachakra'
+---
+
+## Overview
+
+The Invernaderos API is designed for production deployment on Kubernetes with StatefulSets for databases, horizontal scaling for the API, and persistent storage.
+
+<Note>
+  This guide assumes you have a Kubernetes cluster with **cert-manager** and **Traefik Ingress Controller** already installed.
+</Note>
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Traefik Ingress (TLS via cert-manager)                │
+│  inverapi-prod.apptolast.com                            │
+└───────────────┬─────────────────────────────────────────┘
+                │
+                ▼
+┌───────────────────────────────────────────────────────┐
+│  API Deployment (2-3 replicas)                        │
+│  - Spring Boot 3.5.7                                  │
+│  - Java 21 LTS                                        │
+│  - Resource limits: 1 CPU, 2Gi RAM                    │
+└───┬─────────┬──────────┬──────────┬───────────────────┘
+    │         │          │          │
+    ▼         ▼          ▼          ▼
+┌─────┐  ┌────────┐  ┌────────┐  ┌─────┐
+│TimDB│  │PgSQL   │  │Redis   │  │EMQX │
+│5432 │  │5432    │  │6379    │  │1883 │
+└─────┘  └────────┘  └────────┘  └─────┘
+   │         │          │          │
+   ▼         ▼          ▼          ▼
+┌─────────────────────────────────────┐
+│  PersistentVolumes (HostPath)       │
+│  /mnt/k8s-storage/invernaderos/     │
+│  - timescaledb/                     │
+│  - postgresql-metadata/             │
+│  - redis/                           │
+└─────────────────────────────────────┘
+```
+
+## Prerequisites
+
+- Kubernetes cluster v1.28+
+- `kubectl` configured with cluster access
+- **cert-manager** installed for TLS certificates
+- **Traefik** Ingress Controller
+- Storage path available: `/mnt/k8s-storage/invernaderos/`
+- DockerHub credentials (for private images)
+
+## Namespace Structure
+
+<CodeGroup>
+```yaml 00-namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apptolast-invernadero-api
+  labels:
+    app: invernaderos-api
+    environment: production
+```
+</CodeGroup>
+
+## Persistent Storage Setup
+
+<Steps>
+  <Step title="Create storage directories on Kubernetes node">
+    SSH to your Kubernetes node and create directories:
+
+    ```bash
+    sudo mkdir -p /mnt/k8s-storage/invernaderos/{timescaledb,postgresql-metadata,redis}
+    ```
+  </Step>
+
+  <Step title="Set correct ownership">
+    Databases run as user 999, Redis as user 1000:
+
+    ```bash
+    sudo chown -R 999:999 /mnt/k8s-storage/invernaderos/timescaledb
+    sudo chown -R 999:999 /mnt/k8s-storage/invernaderos/postgresql-metadata
+    sudo chown -R 1000:1000 /mnt/k8s-storage/invernaderos/redis
+    sudo chmod -R 755 /mnt/k8s-storage/invernaderos
+    ```
+  </Step>
+
+  <Step title="Create PersistentVolumes">
+    Apply PV manifests:
+
+    ```bash
+    kubectl apply -f k8s/03-storage/
+    ```
+
+    <Accordion title="View PV Configuration">
+      ```yaml pv-timescaledb.yaml
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: timescaledb-pv
+      spec:
+        capacity:
+          storage: 50Gi
+        accessModes:
+          - ReadWriteOnce
+        persistentVolumeReclaimPolicy: Retain
+        hostPath:
+          path: /mnt/k8s-storage/invernaderos/timescaledb
+          type: DirectoryOrCreate
+      ---
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: timescaledb-pvc
+        namespace: apptolast-invernadero-api
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
+      ```
+    </Accordion>
+  </Step>
+</Steps>
+
+## Database Deployments
+
+### TimescaleDB (Time-Series Database)
+
+<Accordion title="StatefulSet Configuration">
+  ```yaml 04-timescaledb/statefulset.yaml
+  apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: timescaledb
+    namespace: apptolast-invernadero-api
+  spec:
+    serviceName: timescaledb
+    replicas: 1
+    selector:
+      matchLabels:
+        app: timescaledb
+    template:
+      metadata:
+        labels:
+          app: timescaledb
+      spec:
+        containers:
+        - name: timescaledb
+          image: timescale/timescaledb:latest-pg16
+          env:
+          - name: POSTGRES_DB
+            value: "greenhouse_timeseries"
+          - name: POSTGRES_USER
+            value: "admin"
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: timescaledb-secret
+                key: password
+          - name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+          ports:
+          - containerPort: 5432
+            name: postgres
+          volumeMounts:
+          - name: data
+            mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            exec:
+              command:
+              - pg_isready
+              - -U
+              - admin
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+              - pg_isready
+              - -U
+              - admin
+            initialDelaySeconds: 5
+            periodSeconds: 5
+        securityContext:
+          fsGroup: 999
+          runAsUser: 999
+    volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 50Gi
+  ```
+
+  **Service (NodePort for external access)**:
+  ```yaml 04-timescaledb/service.yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: timescaledb
+    namespace: apptolast-invernadero-api
+  spec:
+    type: NodePort
+    selector:
+      app: timescaledb
+    ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      nodePort: 30432  # External access at <node-ip>:30432
+  ```
+
+  **Connection Details**:
+  - **Internal**: `timescaledb.apptolast-invernadero-api.svc.cluster.local:5432`
+  - **External**: `<node-ip>:30432`
+  - **Database**: `greenhouse_timeseries` (prod) / `greenhouse_timeseries_dev` (dev)
+  - **Schema**: `iot`
+  - **User**: `admin` (from Secret)
+</Accordion>
+
+### PostgreSQL Metadata
+
+<Accordion title="StatefulSet Configuration">
+  ```yaml 05-postgresql-metadata/statefulset.yaml
+  apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: postgresql-metadata
+    namespace: apptolast-invernadero-api
+  spec:
+    serviceName: postgresql-metadata
+    replicas: 1
+    selector:
+      matchLabels:
+        app: postgresql-metadata
+    template:
+      metadata:
+        labels:
+          app: postgresql-metadata
+      spec:
+        containers:
+        - name: postgresql
+          image: postgres:16-alpine
+          env:
+          - name: POSTGRES_DB
+            value: "postgres"
+          - name: POSTGRES_USER
+            value: "admin"
+          - name: POSTGRES_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: postgresql-metadata-secret
+                key: password
+          - name: PGDATA
+            value: /var/lib/postgresql/data/pgdata
+          ports:
+          - containerPort: 5432
+            name: postgres
+          volumeMounts:
+          - name: data
+            mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+        securityContext:
+          fsGroup: 999
+          runAsUser: 999
+    volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+  ```
+
+  **Service**:
+  ```yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: postgresql-metadata
+    namespace: apptolast-invernadero-api
+  spec:
+    type: NodePort
+    selector:
+      app: postgresql-metadata
+    ports:
+    - port: 5432
+      targetPort: 5432
+      nodePort: 30433
+  ```
+
+  **Connection Details**:
+  - **Internal**: `postgresql-metadata.apptolast-invernadero-api.svc.cluster.local:5432`
+  - **External**: `<node-ip>:30433`
+  - **Database**: `postgres`
+  - **Schema**: `metadata`
+</Accordion>
+
+### Redis Cache
+
+<Accordion title="StatefulSet Configuration">
+  ```yaml 06-redis/statefulset.yaml
+  apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: redis
+    namespace: apptolast-invernadero-api
+  spec:
+    serviceName: redis
+    replicas: 1
+    selector:
+      matchLabels:
+        app: redis
+    template:
+      metadata:
+        labels:
+          app: redis
+      spec:
+        containers:
+        - name: redis
+          image: redis:7-alpine
+          command:
+          - redis-server
+          - /etc/redis/redis.conf
+          ports:
+          - containerPort: 6379
+            name: redis
+          volumeMounts:
+          - name: data
+            mountPath: /data
+            subPath: redis
+          - name: config
+            mountPath: /etc/redis
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+        volumes:
+        - name: config
+          configMap:
+            name: redis-config
+        securityContext:
+          fsGroup: 1000
+          runAsUser: 1000
+    volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+  ```
+
+  **ConfigMap** (`02-configmaps/redis-config.yaml`):
+  ```conf
+  maxmemory 900mb
+  maxmemory-policy volatile-lru
+  save 300 10
+  save 60 10000
+  rdbcompression yes
+  requirepass ${REDIS_PASSWORD}
+  protected-mode yes
+  ```
+
+  **Service**:
+  ```yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: redis
+    namespace: apptolast-invernadero-api
+  spec:
+    type: ClusterIP
+    selector:
+      app: redis
+    ports:
+    - port: 6379
+      targetPort: 6379
+  ---
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: redis-nodeport
+    namespace: apptolast-invernadero-api
+  spec:
+    type: NodePort
+    selector:
+      app: redis
+    ports:
+    - port: 6379
+      targetPort: 6379
+      nodePort: 30379
+  ```
+
+  **Connection Details**:
+  - **Internal**: `redis.apptolast-invernadero-api.svc.cluster.local:6379`
+  - **External**: `<node-ip>:30379` (debugging only)
+</Accordion>
+
+## API Deployment
+
+### Production Deployment
+
+<Accordion title="Deployment Configuration">
+  ```yaml 10-api-prod/deployment.yaml
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: invernaderos-api
+    namespace: apptolast-invernadero-api
+  spec:
+    replicas: 2  # High availability
+    selector:
+      matchLabels:
+        app: invernaderos-api
+        environment: production
+    template:
+      metadata:
+        labels:
+          app: invernaderos-api
+          environment: production
+      spec:
+        containers:
+        - name: api
+          image: apptolast/invernaderos-api:latest
+          imagePullPolicy: Always
+          env:
+          - name: SPRING_PROFILES_ACTIVE
+            value: "prod"
+          - name: JAVA_OPTS
+            value: "-Xms512m -Xmx1024m"
+          - name: TIMESCALE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: invernaderos-api-secret
+                key: timescale-password
+          - name: METADATA_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: invernaderos-api-secret
+                key: metadata-password
+          - name: REDIS_HOST
+            value: "redis.apptolast-invernadero-api.svc.cluster.local"
+          - name: REDIS_PORT
+            value: "6379"
+          - name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: invernaderos-api-secret
+                key: redis-password
+          - name: MQTT_BROKER_URL
+            value: "wss://mqttinvernaderoapi-ws.apptolast.com/mqtt"
+          - name: MQTT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: invernaderos-api-secret
+                key: mqtt-username
+          - name: MQTT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: invernaderos-api-secret
+                key: mqtt-password
+          ports:
+          - containerPort: 8080
+            name: http
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+  ```
+
+  **Service**:
+  ```yaml 10-api-prod/service.yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: invernaderos-api
+    namespace: apptolast-invernadero-api
+  spec:
+    type: ClusterIP
+    selector:
+      app: invernaderos-api
+      environment: production
+    ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  ```
+</Accordion>
+
+### Ingress Configuration (Traefik)
+
+<Accordion title="IngressRoute with TLS">
+  ```yaml 10-api-prod/ingressroute.yaml
+  apiVersion: traefik.containo.us/v1alpha1
+  kind: IngressRoute
+  metadata:
+    name: invernaderos-api
+    namespace: apptolast-invernadero-api
+  spec:
+    entryPoints:
+    - websecure
+    routes:
+    - match: Host(`inverapi-prod.apptolast.com`)
+      kind: Rule
+      services:
+      - name: invernaderos-api
+        port: 8080
+    tls:
+      secretName: invernaderos-api-tls
+  ---
+  apiVersion: cert-manager.io/v1
+  kind: Certificate
+  metadata:
+    name: invernaderos-api-tls
+    namespace: apptolast-invernadero-api
+  spec:
+    secretName: invernaderos-api-tls
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+    dnsNames:
+    - inverapi-prod.apptolast.com
+  ```
+</Accordion>
+
+## Secrets Management
+
+<Warning>
+  **NEVER commit Secrets to version control!** Use `kubectl create secret` or sealed secrets.
+</Warning>
+
+<CodeGroup>
+```bash Create Secrets
+# Generate secure passwords
+TIMESCALE_PASSWORD=$(openssl rand -base64 32)
+METADATA_PASSWORD=$(openssl rand -base64 32)
+REDIS_PASSWORD=$(openssl rand -base64 32)
+MQTT_PASSWORD=$(openssl rand -base64 32)
+
+# Create secret
+kubectl create secret generic invernaderos-api-secret \
+  --from-literal=timescale-password="${TIMESCALE_PASSWORD}" \
+  --from-literal=metadata-password="${METADATA_PASSWORD}" \
+  --from-literal=redis-password="${REDIS_PASSWORD}" \
+  --from-literal=mqtt-username="greenhouse_api" \
+  --from-literal=mqtt-password="${MQTT_PASSWORD}" \
+  -n apptolast-invernadero-api
+```
+
+```yaml 01-secrets.yaml (Template)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: invernaderos-api-secret
+  namespace: apptolast-invernadero-api
+type: Opaque
+stringData:
+  timescale-password: <base64-encoded>
+  metadata-password: <base64-encoded>
+  redis-password: <base64-encoded>
+  mqtt-username: greenhouse_api
+  mqtt-password: <base64-encoded>
+```
+</CodeGroup>
+
+## Deployment Process
+
+<Steps>
+  <Step title="Prepare the cluster">
+    Ensure storage directories exist and have correct ownership (see [Persistent Storage Setup](#persistent-storage-setup)).
+  </Step>
+
+  <Step title="Create namespace and secrets">
+    ```bash
+    kubectl apply -f k8s/00-namespace.yaml
+    kubectl apply -f k8s/01-secrets.yaml
+    kubectl apply -f k8s/02-configmaps/
+    ```
+  </Step>
+
+  <Step title="Deploy storage">
+    ```bash
+    kubectl apply -f k8s/03-storage/
+    kubectl get pv,pvc -n apptolast-invernadero-api
+    ```
+  </Step>
+
+  <Step title="Deploy databases">
+    ```bash
+    kubectl apply -f k8s/04-timescaledb/
+    kubectl apply -f k8s/05-postgresql-metadata/
+    kubectl apply -f k8s/06-redis/
+    
+    # Wait for databases to be ready
+    kubectl wait --for=condition=ready pod -l app=timescaledb -n apptolast-invernadero-api --timeout=300s
+    kubectl wait --for=condition=ready pod -l app=postgresql-metadata -n apptolast-invernadero-api --timeout=300s
+    kubectl wait --for=condition=ready pod -l app=redis -n apptolast-invernadero-api --timeout=300s
+    ```
+  </Step>
+
+  <Step title="Deploy API">
+    ```bash
+    kubectl apply -f k8s/10-api-prod/
+    
+    # Watch deployment progress
+    kubectl rollout status deployment/invernaderos-api -n apptolast-invernadero-api
+    ```
+  </Step>
+
+  <Step title="Verify deployment">
+    ```bash
+    # Check all resources
+    kubectl get all -n apptolast-invernadero-api
+    
+    # Check certificate
+    kubectl get certificate -n apptolast-invernadero-api
+    
+    # Test health endpoint
+    curl https://inverapi-prod.apptolast.com/actuator/health
+    ```
+  </Step>
+</Steps>
+
+## Scaling and Updates
+
+### Horizontal Scaling
+
+```bash
+# Scale API to 3 replicas
+kubectl scale deployment invernaderos-api --replicas=3 -n apptolast-invernadero-api
+
+# Verify scaling
+kubectl get pods -n apptolast-invernadero-api -l app=invernaderos-api
+```
+
+### Rolling Updates
+
+```bash
+# Update to new image version
+kubectl set image deployment/invernaderos-api \
+  api=apptolast/invernaderos-api:v2.0.0 \
+  -n apptolast-invernadero-api
+
+# Watch rollout progress
+kubectl rollout status deployment/invernaderos-api -n apptolast-invernadero-api
+
+# Rollback if needed
+kubectl rollout undo deployment/invernaderos-api -n apptolast-invernadero-api
+```
+
+### Restart Deployment
+
+```bash
+# Restart all pods (e.g., after ConfigMap changes)
+kubectl rollout restart deployment/invernaderos-api -n apptolast-invernadero-api
+```
+
+## Monitoring and Logs
+
+### View Logs
+
+```bash
+# API logs
+kubectl logs -f deployment/invernaderos-api -n apptolast-invernadero-api
+
+# Database logs
+kubectl logs -f statefulset/timescaledb -n apptolast-invernadero-api
+kubectl logs -f statefulset/postgresql-metadata -n apptolast-invernadero-api
+
+# Redis logs
+kubectl logs -f statefulset/redis -n apptolast-invernadero-api
+
+# Previous logs (if pod restarted)
+kubectl logs --previous deployment/invernaderos-api -n apptolast-invernadero-api
+```
+
+### Exec into Pods
+
+```bash
+# Connect to TimescaleDB
+kubectl exec -it statefulset/timescaledb -n apptolast-invernadero-api -- psql -U admin -d greenhouse_timeseries
+
+# Connect to PostgreSQL Metadata
+kubectl exec -it statefulset/postgresql-metadata -n apptolast-invernadero-api -- psql -U admin -d postgres
+
+# Connect to Redis
+kubectl exec -it statefulset/redis -n apptolast-invernadero-api -- redis-cli -a "${REDIS_PASSWORD}"
+
+# Shell into API pod
+kubectl exec -it deployment/invernaderos-api -n apptolast-invernadero-api -- /bin/sh
+```
+
+### Resource Usage
+
+```bash
+# CPU and memory usage
+kubectl top pods -n apptolast-invernadero-api
+
+# Node resource usage
+kubectl top nodes
+```
+
+## Troubleshooting
+
+<Accordion title="Pod stuck in 'Pending' state">
+  **Cause**: PVC not bound or insufficient resources.
+
+  **Solution**:
+  ```bash
+  # Check PVC status
+  kubectl get pvc -n apptolast-invernadero-api
+  
+  # Describe pod for events
+  kubectl describe pod <pod-name> -n apptolast-invernadero-api
+  
+  # Check node resources
+  kubectl describe node <node-name>
+  ```
+
+  Common issues:
+  - Storage path doesn't exist on node
+  - Wrong ownership on storage directory
+  - Node out of resources (CPU/memory)
+</Accordion>
+
+<Accordion title="CrashLoopBackOff">
+  **Cause**: Application failing to start.
+
+  **Solution**:
+  ```bash
+  # View logs
+  kubectl logs <pod-name> -n apptolast-invernadero-api
+  
+  # View previous logs
+  kubectl logs <pod-name> --previous -n apptolast-invernadero-api
+  
+  # Check events
+  kubectl describe pod <pod-name> -n apptolast-invernadero-api
+  ```
+
+  Common issues:
+  - Missing environment variables
+  - Database connection failed
+  - Incorrect Secret values
+</Accordion>
+
+<Accordion title="Certificate not issuing">
+  **Cause**: cert-manager misconfiguration or DNS issue.
+
+  **Solution**:
+  ```bash
+  # Check certificate status
+  kubectl describe certificate invernaderos-api-tls -n apptolast-invernadero-api
+  
+  # Check cert-manager logs
+  kubectl logs -n cert-manager deployment/cert-manager -f
+  
+  # Verify ClusterIssuer
+  kubectl get clusterissuer
+  kubectl describe clusterissuer letsencrypt-prod
+  ```
+
+  Common issues:
+  - DNS not pointing to cluster
+  - ClusterIssuer not configured
+  - Rate limit reached (Let's Encrypt)
+</Accordion>
+
+<Accordion title="Cannot connect to database from API">
+  **Cause**: Database not ready or wrong service name.
+
+  **Solution**:
+  ```bash
+  # Check database pod status
+  kubectl get pods -n apptolast-invernadero-api -l app=timescaledb
+  
+  # Test connectivity from API pod
+  kubectl exec -it deployment/invernaderos-api -n apptolast-invernadero-api -- \
+    sh -c 'nc -zv timescaledb.apptolast-invernadero-api.svc.cluster.local 5432'
+  
+  # Check service endpoints
+  kubectl get endpoints -n apptolast-invernadero-api
+  ```
+</Accordion>
+
+## Backup and Disaster Recovery
+
+### Database Backups
+
+```bash
+# TimescaleDB backup
+kubectl exec -it statefulset/timescaledb -n apptolast-invernadero-api -- \
+  pg_dump -U admin greenhouse_timeseries > backup_timescale_$(date +%Y%m%d).sql
+
+# PostgreSQL Metadata backup
+kubectl exec -it statefulset/postgresql-metadata -n apptolast-invernadero-api -- \
+  pg_dump -U admin postgres > backup_metadata_$(date +%Y%m%d).sql
+
+# Redis backup (RDB snapshot)
+kubectl exec -it statefulset/redis -n apptolast-invernadero-api -- \
+  redis-cli -a "${REDIS_PASSWORD}" BGSAVE
+```
+
+### Restore from Backup
+
+```bash
+# Restore TimescaleDB
+cat backup_timescale_20250116.sql | \
+  kubectl exec -i statefulset/timescaledb -n apptolast-invernadero-api -- \
+  psql -U admin greenhouse_timeseries
+
+# Restore PostgreSQL Metadata
+cat backup_metadata_20250116.sql | \
+  kubectl exec -i statefulset/postgresql-metadata -n apptolast-invernadero-api -- \
+  psql -U admin postgres
+```
+
+## CI/CD Integration
+
+GitHub Actions workflow (`.github/workflows/build-and-push.yml`):
+
+<CodeGroup>
+```yaml GitHub Actions
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 21
+      uses: actions/setup-java@v3
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+    
+    - name: Build with Gradle
+      run: ./gradlew build -x test
+    
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    
+    - name: Build and push
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: |
+          apptolast/invernaderos-api:${{ github.ref_name }}
+          apptolast/invernaderos-api:latest
+```
+</CodeGroup>
+
+After image is pushed, update Kubernetes:
+
+```bash
+# Force pull new image
+kubectl rollout restart deployment/invernaderos-api -n apptolast-invernadero-api
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="gear" href="/deployment/configuration">
+    Configure environment variables and application settings
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/observability/monitoring">
+    Set up Prometheus and Grafana dashboards
+  </Card>
+  <Card title="High Availability" icon="server" href="/deployment/high-availability">
+    Configure database replication and load balancing
+  </Card>
+  <Card title="Security" icon="shield" href="/security/best-practices">
+    Implement security best practices
+  </Card>
+</CardGroup>

@@ -1,0 +1,409 @@
+---
+title: 'User Management'
+description: 'Manage users within a tenant'
+---
+
+## Overview
+
+Users belong to a tenant and have specific roles that determine their access level within the system. Each user can access greenhouses, view sensor data, and manage alerts based on their role.
+
+## Get All Users for Tenant
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/users
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/users" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve all users belonging to a specific tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">
+  Unique identifier of the user
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unique readable code (e.g., "USR-00001")
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Username for login
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  User's email address
+</ResponseField>
+
+<ResponseField name="role" type="string">
+  User role (ADMIN, OPERATOR, VIEWER)
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant the user belongs to
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the user account is active
+</ResponseField>
+
+<ResponseField name="lastLogin" type="timestamp">
+  Last login timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="createdAt" type="timestamp">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="updatedAt" type="timestamp">
+  Last update timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseExample>
+```json Response
+[
+  {
+    "id": 1,
+    "code": "USR-00001",
+    "username": "jdoe",
+    "email": "jdoe@vivero.com",
+    "role": "ADMIN",
+    "tenantId": 1,
+    "isActive": true,
+    "lastLogin": "2025-03-03T10:30:00Z",
+    "createdAt": "2025-03-01T10:00:00Z",
+    "updatedAt": "2025-03-01T10:00:00Z"
+  },
+  {
+    "id": 2,
+    "code": "USR-00002",
+    "username": "msmith",
+    "email": "msmith@vivero.com",
+    "role": "OPERATOR",
+    "tenantId": 1,
+    "isActive": true,
+    "lastLogin": "2025-03-02T15:20:00Z",
+    "createdAt": "2025-03-01T11:00:00Z",
+    "updatedAt": "2025-03-01T11:00:00Z"
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get User by ID
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/users/{userId}
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/users/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve a specific user belonging to a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="userId" type="long" required>
+  Unique identifier of the user
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "USR-00001",
+  "username": "jdoe",
+  "email": "jdoe@vivero.com",
+  "role": "ADMIN",
+  "tenantId": 1,
+  "isActive": true,
+  "lastLogin": "2025-03-03T10:30:00Z",
+  "createdAt": "2025-03-01T10:00:00Z",
+  "updatedAt": "2025-03-01T10:00:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "User not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Create User
+
+<RequestExample>
+```bash POST /api/v1/tenants/{tenantId}/users
+curl -X POST "https://api.invernaderos.com/api/v1/tenants/1/users" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "jdoe",
+    "email": "jdoe@vivero.com",
+    "passwordRaw": "SecurePassword123!",
+    "role": "OPERATOR",
+    "isActive": true
+  }'
+```
+</RequestExample>
+
+Create a new user for a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Request Body
+
+<ParamField body="username" type="string" required>
+  Username for login (must be unique)
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address (must be valid and unique)
+</ParamField>
+
+<ParamField body="passwordRaw" type="string" required>
+  User's password (will be hashed before storage)
+</ParamField>
+
+<ParamField body="role" type="string" required>
+  User role: ADMIN, OPERATOR, or VIEWER
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the user account is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 - Created
+{
+  "id": 3,
+  "code": "USR-00003",
+  "username": "jdoe",
+  "email": "jdoe@vivero.com",
+  "role": "OPERATOR",
+  "tenantId": 1,
+  "isActive": true,
+  "lastLogin": null,
+  "createdAt": "2025-03-03T21:45:00Z",
+  "updatedAt": "2025-03-03T21:45:00Z"
+}
+```
+</ResponseExample>
+
+---
+
+## Update User
+
+<RequestExample>
+```bash PUT /api/v1/tenants/{tenantId}/users/{userId}
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1/users/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "ADMIN",
+    "isActive": true
+  }'
+```
+</RequestExample>
+
+Update an existing user. All fields are optional.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="userId" type="long" required>
+  Unique identifier of the user to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="username" type="string">
+  Username for login
+</ParamField>
+
+<ParamField body="email" type="string">
+  Email address
+</ParamField>
+
+<ParamField body="passwordRaw" type="string">
+  New password (if changing)
+</ParamField>
+
+<ParamField body="role" type="string">
+  User role (ADMIN, OPERATOR, VIEWER)
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Whether the user account is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "USR-00001",
+  "username": "jdoe",
+  "email": "jdoe@vivero.com",
+  "role": "ADMIN",
+  "tenantId": 1,
+  "isActive": true,
+  "lastLogin": "2025-03-03T10:30:00Z",
+  "createdAt": "2025-03-01T10:00:00Z",
+  "updatedAt": "2025-03-03T21:50:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "User not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Delete User
+
+<RequestExample>
+```bash DELETE /api/v1/tenants/{tenantId}/users/{userId}
+curl -X DELETE "https://api.invernaderos.com/api/v1/tenants/1/users/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Delete a user from a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="userId" type="long" required>
+  Unique identifier of the user to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```bash 204 - No Content
+# Successfully deleted
+```
+
+```json 404 - Not Found
+{
+  "error": "User not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## User Roles and Permissions
+
+<Tabs>
+  <Tab title="ADMIN">
+    **Administrator** - Full access to all features
+    
+    **Permissions:**
+    - Create, read, update, delete tenants
+    - Manage all greenhouses
+    - Manage all users (including other admins)
+    - View and resolve all alerts
+    - Configure system settings
+    - Access audit logs
+  </Tab>
+  <Tab title="OPERATOR">
+    **Operator** - Manage greenhouse operations
+    
+    **Permissions:**
+    - View tenant information (read-only)
+    - Manage greenhouses (create, update)
+    - View and manage sensors/actuators
+    - View and resolve alerts
+    - Cannot manage users
+    - Cannot delete greenhouses
+  </Tab>
+  <Tab title="VIEWER">
+    **Viewer** - Read-only access
+    
+    **Permissions:**
+    - View tenant information
+    - View greenhouses and sensor data
+    - View alerts (cannot resolve)
+    - Cannot create, update, or delete anything
+    - Cannot manage users
+  </Tab>
+</Tabs>
+
+---
+
+## User Activation and Deactivation
+
+Users can be activated or deactivated without deleting them:
+
+### Deactivate User
+
+```bash
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1/users/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"isActive": false}'
+```
+
+**Effect:**
+- User cannot log in
+- Existing sessions are invalidated
+- User data and history are preserved
+- Can be reactivated later
+
+### Reactivate User
+
+```bash
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1/users/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"isActive": true}'
+```
+
+**Effect:**
+- User can log in again
+- All previous data and permissions are restored
+
+---
+
+## Related Resources
+
+- [Tenant Management](/api/tenants/overview) - Manage parent tenant
+- [Greenhouse Management](/api/tenants/greenhouses) - Greenhouses users can access
+- [Alert Management](/api/tenants/alerts) - Alerts users can view/resolve

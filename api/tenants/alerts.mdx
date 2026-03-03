@@ -1,0 +1,586 @@
+---
+title: 'Alert Management'
+description: 'View and manage alerts for a tenant'
+---
+
+## Overview
+
+Alerts are generated when sensor readings exceed thresholds, sensors go offline, or actuators fail. Each alert belongs to a tenant and can be assigned different severity levels.
+
+## Get All Alerts for Tenant
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/alerts
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/alerts" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve all alerts belonging to a specific tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">
+  Unique identifier of the alert
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unique readable code (e.g., "ALT-00001")
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant that owns this alert
+</ResponseField>
+
+<ResponseField name="sectorId" type="long">
+  ID of the sector where the alert occurred
+</ResponseField>
+
+<ResponseField name="sectorCode" type="string">
+  Code of the sector (e.g., "SEC-00001")
+</ResponseField>
+
+<ResponseField name="alertTypeId" type="short">
+  ID of the alert type (1=THRESHOLD_EXCEEDED, 2=SENSOR_OFFLINE, 3=ACTUATOR_FAILURE, 4=SYSTEM_ERROR)
+</ResponseField>
+
+<ResponseField name="alertTypeName" type="string">
+  Name of the alert type
+</ResponseField>
+
+<ResponseField name="severityId" type="short">
+  ID of severity (1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL)
+</ResponseField>
+
+<ResponseField name="severityName" type="string">
+  Name of severity level
+</ResponseField>
+
+<ResponseField name="severityLevel" type="short">
+  Numeric severity level (1-4)
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Short descriptive message
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Detailed description of the alert
+</ResponseField>
+
+<ResponseField name="isResolved" type="boolean">
+  Whether the alert has been resolved
+</ResponseField>
+
+<ResponseField name="resolvedAt" type="timestamp">
+  When the alert was resolved (ISO 8601)
+</ResponseField>
+
+<ResponseField name="resolvedByUserId" type="long">
+  ID of the user who resolved the alert
+</ResponseField>
+
+<ResponseField name="resolvedByUserName" type="string">
+  Username of the user who resolved the alert
+</ResponseField>
+
+<ResponseField name="createdAt" type="timestamp">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="updatedAt" type="timestamp">
+  Last update timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseExample>
+```json Response
+[
+  {
+    "id": 1,
+    "code": "ALT-00001",
+    "tenantId": 1,
+    "sectorId": 5,
+    "sectorCode": "SEC-00005",
+    "alertTypeId": 1,
+    "alertTypeName": "THRESHOLD_EXCEEDED",
+    "severityId": 4,
+    "severityName": "CRITICAL",
+    "severityLevel": 4,
+    "message": "Temperatura excede el umbral máximo",
+    "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos en el sector 5",
+    "isResolved": false,
+    "resolvedAt": null,
+    "resolvedByUserId": null,
+    "resolvedByUserName": null,
+    "createdAt": "2025-03-03T14:30:00Z",
+    "updatedAt": "2025-03-03T14:30:00Z"
+  },
+  {
+    "id": 2,
+    "code": "ALT-00002",
+    "tenantId": 1,
+    "sectorId": 3,
+    "sectorCode": "SEC-00003",
+    "alertTypeId": 2,
+    "alertTypeName": "SENSOR_OFFLINE",
+    "severityId": 3,
+    "severityName": "ERROR",
+    "severityLevel": 3,
+    "message": "Sensor de humedad sin respuesta",
+    "description": "El sensor HUMI-003 no ha enviado datos en los últimos 30 minutos",
+    "isResolved": true,
+    "resolvedAt": "2025-03-03T15:45:00Z",
+    "resolvedByUserId": 1,
+    "resolvedByUserName": "jdoe",
+    "createdAt": "2025-03-03T15:00:00Z",
+    "updatedAt": "2025-03-03T15:45:00Z"
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Alert by ID
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/alerts/{alertId}
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/alerts/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve a specific alert belonging to a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="alertId" type="long" required>
+  Unique identifier of the alert
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "ALT-00001",
+  "tenantId": 1,
+  "sectorId": 5,
+  "sectorCode": "SEC-00005",
+  "alertTypeId": 1,
+  "alertTypeName": "THRESHOLD_EXCEEDED",
+  "severityId": 4,
+  "severityName": "CRITICAL",
+  "severityLevel": 4,
+  "message": "Temperatura excede el umbral máximo",
+  "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos en el sector 5",
+  "isResolved": false,
+  "resolvedAt": null,
+  "resolvedByUserId": null,
+  "resolvedByUserName": null,
+  "createdAt": "2025-03-03T14:30:00Z",
+  "updatedAt": "2025-03-03T14:30:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Alert not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Create Alert
+
+<RequestExample>
+```bash POST /api/v1/tenants/{tenantId}/alerts
+curl -X POST "https://api.invernaderos.com/api/v1/tenants/1/alerts" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sectorId": 5,
+    "alertTypeId": 1,
+    "severityId": 4,
+    "message": "Temperatura excede el umbral máximo",
+    "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos"
+  }'
+```
+</RequestExample>
+
+Create a new alert for a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Request Body
+
+<ParamField body="sectorId" type="long" required>
+  ID of the sector where the alert occurred
+</ParamField>
+
+<ParamField body="alertTypeId" type="short">
+  Alert type ID (1=THRESHOLD_EXCEEDED, 2=SENSOR_OFFLINE, 3=ACTUATOR_FAILURE, 4=SYSTEM_ERROR)
+</ParamField>
+
+<ParamField body="severityId" type="short">
+  Severity ID (1=INFO, 2=WARNING, 3=ERROR, 4=CRITICAL)
+</ParamField>
+
+<ParamField body="message" type="string">
+  Short descriptive message
+</ParamField>
+
+<ParamField body="description" type="string">
+  Detailed description of the alert
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 - Created
+{
+  "id": 3,
+  "code": "ALT-00003",
+  "tenantId": 1,
+  "sectorId": 5,
+  "sectorCode": "SEC-00005",
+  "alertTypeId": 1,
+  "alertTypeName": "THRESHOLD_EXCEEDED",
+  "severityId": 4,
+  "severityName": "CRITICAL",
+  "severityLevel": 4,
+  "message": "Temperatura excede el umbral máximo",
+  "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos",
+  "isResolved": false,
+  "resolvedAt": null,
+  "resolvedByUserId": null,
+  "resolvedByUserName": null,
+  "createdAt": "2025-03-03T21:55:00Z",
+  "updatedAt": "2025-03-03T21:55:00Z"
+}
+```
+</ResponseExample>
+
+---
+
+## Update Alert
+
+<RequestExample>
+```bash PUT /api/v1/tenants/{tenantId}/alerts/{alertId}
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1/alerts/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "severityId": 2,
+    "message": "Temperatura normalizada"
+  }'
+```
+</RequestExample>
+
+Update an existing alert. All fields are optional.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="alertId" type="long" required>
+  Unique identifier of the alert to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="sectorId" type="long">
+  ID of the sector (must belong to same tenant)
+</ParamField>
+
+<ParamField body="alertTypeId" type="short">
+  Alert type ID
+</ParamField>
+
+<ParamField body="severityId" type="short">
+  Severity ID
+</ParamField>
+
+<ParamField body="message" type="string">
+  Short descriptive message
+</ParamField>
+
+<ParamField body="description" type="string">
+  Detailed description
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "ALT-00001",
+  "tenantId": 1,
+  "sectorId": 5,
+  "sectorCode": "SEC-00005",
+  "alertTypeId": 1,
+  "alertTypeName": "THRESHOLD_EXCEEDED",
+  "severityId": 2,
+  "severityName": "WARNING",
+  "severityLevel": 2,
+  "message": "Temperatura normalizada",
+  "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos en el sector 5",
+  "isResolved": false,
+  "resolvedAt": null,
+  "resolvedByUserId": null,
+  "resolvedByUserName": null,
+  "createdAt": "2025-03-03T14:30:00Z",
+  "updatedAt": "2025-03-03T22:00:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Alert not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Resolve Alert
+
+<RequestExample>
+```bash POST /api/v1/tenants/{tenantId}/alerts/{alertId}/resolve
+curl -X POST "https://api.invernaderos.com/api/v1/tenants/1/alerts/1/resolve" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resolvedByUserId": 1
+  }'
+```
+</RequestExample>
+
+Mark an alert as resolved.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="alertId" type="long" required>
+  Unique identifier of the alert to resolve
+</ParamField>
+
+### Request Body
+
+<ParamField body="resolvedByUserId" type="long">
+  ID of the user resolving the alert (optional)
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "ALT-00001",
+  "tenantId": 1,
+  "sectorId": 5,
+  "sectorCode": "SEC-00005",
+  "alertTypeId": 1,
+  "alertTypeName": "THRESHOLD_EXCEEDED",
+  "severityId": 4,
+  "severityName": "CRITICAL",
+  "severityLevel": 4,
+  "message": "Temperatura excede el umbral máximo",
+  "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos en el sector 5",
+  "isResolved": true,
+  "resolvedAt": "2025-03-03T22:05:00Z",
+  "resolvedByUserId": 1,
+  "resolvedByUserName": "jdoe",
+  "createdAt": "2025-03-03T14:30:00Z",
+  "updatedAt": "2025-03-03T22:05:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Alert not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Reopen Alert
+
+<RequestExample>
+```bash POST /api/v1/tenants/{tenantId}/alerts/{alertId}/reopen
+curl -X POST "https://api.invernaderos.com/api/v1/tenants/1/alerts/1/reopen" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Reopen a previously resolved alert.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="alertId" type="long" required>
+  Unique identifier of the alert to reopen
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "ALT-00001",
+  "tenantId": 1,
+  "sectorId": 5,
+  "sectorCode": "SEC-00005",
+  "alertTypeId": 1,
+  "alertTypeName": "THRESHOLD_EXCEEDED",
+  "severityId": 4,
+  "severityName": "CRITICAL",
+  "severityLevel": 4,
+  "message": "Temperatura excede el umbral máximo",
+  "description": "Se detectó que la temperatura superó los 35°C durante más de 10 minutos en el sector 5",
+  "isResolved": false,
+  "resolvedAt": null,
+  "resolvedByUserId": null,
+  "resolvedByUserName": null,
+  "createdAt": "2025-03-03T14:30:00Z",
+  "updatedAt": "2025-03-03T22:10:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Alert not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Delete Alert
+
+<RequestExample>
+```bash DELETE /api/v1/tenants/{tenantId}/alerts/{alertId}
+curl -X DELETE "https://api.invernaderos.com/api/v1/tenants/1/alerts/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Delete an alert from a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="alertId" type="long" required>
+  Unique identifier of the alert to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```bash 204 - No Content
+# Successfully deleted
+```
+
+```json 404 - Not Found
+{
+  "error": "Alert not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Alert Filtering
+
+You can filter alerts using query parameters (implementation may vary):
+
+### Filter by Resolution Status
+
+<Tabs>
+  <Tab title="Unresolved Alerts">
+    ```bash
+    GET /api/v1/tenants/1/alerts?isResolved=false
+    ```
+    
+    Returns only unresolved alerts that require attention.
+  </Tab>
+  <Tab title="Resolved Alerts">
+    ```bash
+    GET /api/v1/tenants/1/alerts?isResolved=true
+    ```
+    
+    Returns alerts that have been resolved.
+  </Tab>
+  <Tab title="Critical Alerts">
+    ```bash
+    GET /api/v1/tenants/1/alerts?severityId=4
+    ```
+    
+    Returns only CRITICAL severity alerts.
+  </Tab>
+</Tabs>
+
+### Filter by Alert Type
+
+- **THRESHOLD_EXCEEDED** (alertTypeId=1): Sensor readings exceed configured thresholds
+- **SENSOR_OFFLINE** (alertTypeId=2): Sensor stopped sending data
+- **ACTUATOR_FAILURE** (alertTypeId=3): Actuator malfunction detected
+- **SYSTEM_ERROR** (alertTypeId=4): System-level errors
+
+### Filter by Severity
+
+<Tabs>
+  <Tab title="INFO (1)">
+    Informational messages, no action required.
+  </Tab>
+  <Tab title="WARNING (2)">
+    Potential issues that should be monitored.
+  </Tab>
+  <Tab title="ERROR (3)">
+    Errors that require attention but are not critical.
+  </Tab>
+  <Tab title="CRITICAL (4)">
+    Urgent issues requiring immediate action.
+  </Tab>
+</Tabs>
+
+---
+
+## Related Resources
+
+- [Tenant Management](/api/tenants/overview) - Manage parent tenant
+- [Greenhouse Management](/api/tenants/greenhouses) - Greenhouses associated with alerts
+- [User Management](/api/tenants/users) - Users who can resolve alerts

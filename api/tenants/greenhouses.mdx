@@ -1,0 +1,415 @@
+---
+title: 'Greenhouse Management'
+description: 'Manage greenhouses within a tenant'
+---
+
+## Overview
+
+Greenhouses are physical structures that belong to a tenant. Each greenhouse contains sensors, actuators, and sectors for monitoring and controlling environmental conditions.
+
+## Get All Greenhouses for Tenant
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/greenhouses
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/greenhouses" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve all greenhouses belonging to a specific tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="long">
+  Unique identifier of the greenhouse
+</ResponseField>
+
+<ResponseField name="code" type="string">
+  Unique readable code (e.g., "GRH-00001")
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Greenhouse name
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant that owns this greenhouse
+</ResponseField>
+
+<ResponseField name="location" type="object">
+  Geographic coordinates
+  <ResponseField name="lat" type="double">
+    Latitude
+  </ResponseField>
+  <ResponseField name="lon" type="double">
+    Longitude
+  </ResponseField>
+</ResponseField>
+
+<ResponseField name="areaM2" type="decimal">
+  Area in square meters
+</ResponseField>
+
+<ResponseField name="timezone" type="string">
+  Timezone (e.g., "Europe/Madrid")
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean">
+  Whether the greenhouse is active
+</ResponseField>
+
+<ResponseField name="createdAt" type="timestamp">
+  Creation timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseField name="updatedAt" type="timestamp">
+  Last update timestamp (ISO 8601)
+</ResponseField>
+
+<ResponseExample>
+```json Response
+[
+  {
+    "id": 1,
+    "code": "GRH-00001",
+    "name": "Invernadero Principal",
+    "tenantId": 1,
+    "location": {
+      "lat": 36.8381,
+      "lon": -2.4597
+    },
+    "areaM2": 1500.50,
+    "timezone": "Europe/Madrid",
+    "isActive": true,
+    "createdAt": "2025-03-01T10:00:00Z",
+    "updatedAt": "2025-03-01T10:00:00Z"
+  }
+]
+```
+</ResponseExample>
+
+---
+
+## Get Greenhouse by ID
+
+<RequestExample>
+```bash GET /api/v1/tenants/{tenantId}/greenhouses/{greenhouseId}
+curl -X GET "https://api.invernaderos.com/api/v1/tenants/1/greenhouses/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Retrieve a specific greenhouse belonging to a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="greenhouseId" type="long" required>
+  Unique identifier of the greenhouse
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "GRH-00001",
+  "name": "Invernadero Principal",
+  "tenantId": 1,
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "areaM2": 1500.50,
+  "timezone": "Europe/Madrid",
+  "isActive": true,
+  "createdAt": "2025-03-01T10:00:00Z",
+  "updatedAt": "2025-03-01T10:00:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Greenhouse not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Create Greenhouse
+
+<RequestExample>
+```bash POST /api/v1/tenants/{tenantId}/greenhouses
+curl -X POST "https://api.invernaderos.com/api/v1/tenants/1/greenhouses" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Invernadero Principal",
+    "location": {
+      "lat": 36.8381,
+      "lon": -2.4597
+    },
+    "areaM2": 1500.50,
+    "timezone": "Europe/Madrid",
+    "isActive": true
+  }'
+```
+</RequestExample>
+
+Create a new greenhouse for a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+### Request Body
+
+<ParamField body="name" type="string" required>
+  Greenhouse name
+</ParamField>
+
+<ParamField body="location" type="object">
+  Geographic coordinates
+  <ParamField body="lat" type="double">
+    Latitude
+  </ParamField>
+  <ParamField body="lon" type="double">
+    Longitude
+  </ParamField>
+</ParamField>
+
+<ParamField body="areaM2" type="decimal">
+  Area in square meters
+</ParamField>
+
+<ParamField body="timezone" type="string" default="Europe/Madrid">
+  Timezone identifier
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the greenhouse is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 201 - Created
+{
+  "id": 2,
+  "code": "GRH-00002",
+  "name": "Invernadero Principal",
+  "tenantId": 1,
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "areaM2": 1500.50,
+  "timezone": "Europe/Madrid",
+  "isActive": true,
+  "createdAt": "2025-03-03T21:35:00Z",
+  "updatedAt": "2025-03-03T21:35:00Z"
+}
+```
+</ResponseExample>
+
+---
+
+## Update Greenhouse
+
+<RequestExample>
+```bash PUT /api/v1/tenants/{tenantId}/greenhouses/{greenhouseId}
+curl -X PUT "https://api.invernaderos.com/api/v1/tenants/1/greenhouses/1" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Invernadero Principal - Actualizado",
+    "areaM2": 1600.00
+  }'
+```
+</RequestExample>
+
+Update an existing greenhouse. All fields are optional.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="greenhouseId" type="long" required>
+  Unique identifier of the greenhouse to update
+</ParamField>
+
+### Request Body
+
+All fields are optional. Only provided fields will be updated.
+
+<ParamField body="name" type="string">
+  Greenhouse name
+</ParamField>
+
+<ParamField body="location" type="object">
+  Geographic coordinates
+</ParamField>
+
+<ParamField body="areaM2" type="decimal">
+  Area in square meters
+</ParamField>
+
+<ParamField body="timezone" type="string">
+  Timezone identifier
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Whether the greenhouse is active
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```json 200 - Success
+{
+  "id": 1,
+  "code": "GRH-00001",
+  "name": "Invernadero Principal - Actualizado",
+  "tenantId": 1,
+  "location": {
+    "lat": 36.8381,
+    "lon": -2.4597
+  },
+  "areaM2": 1600.00,
+  "timezone": "Europe/Madrid",
+  "isActive": true,
+  "createdAt": "2025-03-01T10:00:00Z",
+  "updatedAt": "2025-03-03T21:40:00Z"
+}
+```
+
+```json 404 - Not Found
+{
+  "error": "Greenhouse not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## Delete Greenhouse
+
+<RequestExample>
+```bash DELETE /api/v1/tenants/{tenantId}/greenhouses/{greenhouseId}
+curl -X DELETE "https://api.invernaderos.com/api/v1/tenants/1/greenhouses/1" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+</RequestExample>
+
+Delete a greenhouse from a tenant.
+
+### Path Parameters
+
+<ParamField path="tenantId" type="long" required>
+  Unique identifier of the tenant
+</ParamField>
+
+<ParamField path="greenhouseId" type="long" required>
+  Unique identifier of the greenhouse to delete
+</ParamField>
+
+### Response
+
+<ResponseExample>
+```bash 204 - No Content
+# Successfully deleted
+```
+
+```json 404 - Not Found
+{
+  "error": "Greenhouse not found or does not belong to tenant"
+}
+```
+</ResponseExample>
+
+---
+
+## MQTT Topic Mapping
+
+Each greenhouse is associated with an MQTT topic for receiving sensor data:
+
+### Topic Structure
+
+```
+GREENHOUSE/{tenantId}
+```
+
+**Examples:**
+- `GREENHOUSE/SARA` - Vivero Sara's greenhouse data
+- `GREENHOUSE/001` - Generic tenant with ID 001
+- `GREENHOUSE/DEFAULT` - Legacy format (backward compatible)
+
+### Data Flow
+
+1. **Sensor devices** publish data to the MQTT topic
+2. **API receives** messages via MQTT subscriber
+3. **Data is cached** in Redis (last 1000 messages, 24h TTL)
+4. **Data is persisted** in TimescaleDB time-series database
+5. **WebSocket broadcast** sends real-time updates to connected clients
+
+### Sensor Data Structure
+
+Greenhouse sensor messages contain 22 fields:
+
+<Tabs>
+  <Tab title="Temperature & Humidity">
+    - `TEMPERATURA INVERNADERO 01` - Temperature for greenhouse 1 (°C)
+    - `HUMEDAD INVERNADERO 01` - Humidity for greenhouse 1 (%)
+    - `TEMPERATURA INVERNADERO 02` - Temperature for greenhouse 2 (°C)
+    - `HUMEDAD INVERNADERO 02` - Humidity for greenhouse 2 (%)
+    - `TEMPERATURA INVERNADERO 03` - Temperature for greenhouse 3 (°C)
+    - `HUMEDAD INVERNADERO 03` - Humidity for greenhouse 3 (%)
+  </Tab>
+  <Tab title="Sectors (12 fields)">
+    - `INVERNADERO_01_SECTOR_01` through `INVERNADERO_03_SECTOR_04`
+    - Each sector has numeric values for monitoring
+  </Tab>
+  <Tab title="Extractors">
+    - `INVERNADERO_01_EXTRACTOR` - Extractor status for greenhouse 1
+    - `INVERNADERO_02_EXTRACTOR` - Extractor status for greenhouse 2
+    - `INVERNADERO_03_EXTRACTOR` - Extractor status for greenhouse 3
+  </Tab>
+  <Tab title="Reserved">
+    - `RESERVA` - Reserved field for future use
+  </Tab>
+</Tabs>
+
+---
+
+## Sectors and Devices
+
+Each greenhouse can contain:
+
+- **Sectors**: Physical zones within the greenhouse for monitoring specific areas
+- **Sensors**: Temperature, humidity, soil moisture, light intensity, CO2 levels
+- **Actuators**: Irrigation systems, ventilation fans, heating/cooling units
+
+These are managed through separate endpoints (see related resources below).
+
+---
+
+## Related Resources
+
+- [Tenant Management](/api/tenants/overview) - Manage parent tenant
+- [User Management](/api/tenants/users) - Manage users with access to greenhouses
+- [Alert Management](/api/tenants/alerts) - View alerts from greenhouse sensors

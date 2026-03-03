@@ -1,0 +1,695 @@
+---
+title: "Statistics & Aggregations"
+description: "Query aggregated sensor statistics including min/max/avg, trends, and time-series data"
+---
+
+## Get Historical Data
+
+<api method="GET" url="/api/v1/statistics/historical-data" />
+
+Retrieve complete historical data for a sensor type including current value, statistics, trend analysis, and chart data.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="long" required>
+  ID of the greenhouse
+</ParamField>
+
+<ParamField query="sensorType" type="string" required>
+  Type of sensor (TEMPERATURE, HUMIDITY, CO2, LIGHT, etc.)
+</ParamField>
+
+<ParamField query="period" type="string" default="24h">
+  Time period for analysis. Options: `24h` (hourly aggregation), `7d` (daily), `30d` (daily)
+</ParamField>
+
+### Response
+
+<ResponseField name="greenhouseId" type="long">
+  ID of the greenhouse
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant
+</ResponseField>
+
+<ResponseField name="sensorType" type="string">
+  Type of sensor queried
+</ResponseField>
+
+<ResponseField name="unit" type="string">
+  Unit of measurement
+</ResponseField>
+
+<ResponseField name="currentValue" type="number">
+  Most recent sensor reading
+</ResponseField>
+
+<ResponseField name="currentValueTimestamp" type="string">
+  Timestamp of current value (ISO 8601)
+</ResponseField>
+
+<ResponseField name="avgValue" type="number">
+  Average value over the period
+</ResponseField>
+
+<ResponseField name="minValue" type="number">
+  Minimum value recorded in the period
+</ResponseField>
+
+<ResponseField name="maxValue" type="number">
+  Maximum value recorded in the period
+</ResponseField>
+
+<ResponseField name="medianValue" type="number" optional>
+  Median value (if calculated)
+</ResponseField>
+
+<ResponseField name="trendPercent" type="number">
+  Percentage change from average (positive or negative)
+</ResponseField>
+
+<ResponseField name="trendDirection" type="string">
+  Trend direction: `INCREASING`, `DECREASING`, or `STABLE`
+</ResponseField>
+
+<ResponseField name="chartData" type="array">
+  Array of time-series data points for charting
+  <Expandable title="ChartDataPoint properties">
+    <ResponseField name="timestamp" type="string">
+      Timestamp of the data point
+    </ResponseField>
+    <ResponseField name="value" type="number">
+      Aggregated value at this time
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="period" type="string">
+  The period string used for this query
+</ResponseField>
+
+<ResponseField name="startTime" type="string">
+  Start of the time range (ISO 8601)
+</ResponseField>
+
+<ResponseField name="endTime" type="string">
+  End of the time range (ISO 8601)
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/statistics/historical-data?greenhouseId=123456789&sensorType=TEMPERATURE&period=24h" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  greenhouseId: '123456789',
+  sensorType: 'TEMPERATURE',
+  period: '24h'
+});
+
+const response = await fetch(
+  `https://api.example.com/api/v1/statistics/historical-data?${params}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const data = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.example.com/api/v1/statistics/historical-data',
+    params={
+        'greenhouseId': 123456789,
+        'sensorType': 'TEMPERATURE',
+        'period': '24h'
+    },
+    headers={'Accept': 'application/json'}
+)
+
+data = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "greenhouseId": 123456789,
+  "tenantId": 987654321,
+  "sensorType": "TEMPERATURE",
+  "unit": "°C",
+  "currentValue": 22.5,
+  "currentValueTimestamp": "2025-03-03T14:30:00Z",
+  "avgValue": 21.8,
+  "minValue": 19.5,
+  "maxValue": 24.1,
+  "medianValue": 21.9,
+  "trendPercent": 3.2,
+  "trendDirection": "INCREASING",
+  "chartData": [
+    {
+      "timestamp": "2025-03-02T14:00:00Z",
+      "value": 20.5
+    },
+    {
+      "timestamp": "2025-03-02T15:00:00Z",
+      "value": 20.8
+    },
+    {
+      "timestamp": "2025-03-02T16:00:00Z",
+      "value": 21.2
+    }
+  ],
+  "period": "24h",
+  "startTime": "2025-03-02T14:30:00Z",
+  "endTime": "2025-03-03T14:30:00Z"
+}
+```
+
+---
+
+## Get Hourly Statistics
+
+<api method="GET" url="/api/v1/statistics/hourly" />
+
+Retrieve hourly aggregated statistics for a sensor type.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="long" required>
+  ID of the greenhouse
+</ParamField>
+
+<ParamField query="sensorType" type="string" required>
+  Type of sensor
+</ParamField>
+
+<ParamField query="hours" type="integer" default="24">
+  Number of hours to retrieve
+</ParamField>
+
+### Response
+
+<ResponseField name="bucket" type="string">
+  Start of the 1-hour bucket (ISO 8601)
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="long">
+  ID of the greenhouse
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant
+</ResponseField>
+
+<ResponseField name="sensorType" type="string">
+  Type of sensor
+</ResponseField>
+
+<ResponseField name="unit" type="string">
+  Unit of measurement
+</ResponseField>
+
+<ResponseField name="avgValue" type="number">
+  Average value for the hour
+</ResponseField>
+
+<ResponseField name="minValue" type="number">
+  Minimum value in the hour
+</ResponseField>
+
+<ResponseField name="maxValue" type="number">
+  Maximum value in the hour
+</ResponseField>
+
+<ResponseField name="stddevValue" type="number">
+  Standard deviation
+</ResponseField>
+
+<ResponseField name="countReadings" type="long">
+  Number of readings in the hour
+</ResponseField>
+
+<ResponseField name="nullCount" type="long" optional>
+  Number of null readings
+</ResponseField>
+
+<ResponseField name="firstReadingAt" type="string">
+  Timestamp of first reading in hour
+</ResponseField>
+
+<ResponseField name="lastReadingAt" type="string">
+  Timestamp of last reading in hour
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/statistics/hourly?greenhouseId=123456789&sensorType=TEMPERATURE&hours=48" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  greenhouseId: '123456789',
+  sensorType: 'TEMPERATURE',
+  hours: '48'
+});
+
+const response = await fetch(
+  `https://api.example.com/api/v1/statistics/hourly?${params}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const hourlyStats = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.example.com/api/v1/statistics/hourly',
+    params={
+        'greenhouseId': 123456789,
+        'sensorType': 'TEMPERATURE',
+        'hours': 48
+    },
+    headers={'Accept': 'application/json'}
+)
+
+hourly_stats = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+[
+  {
+    "bucket": "2025-03-03T13:00:00Z",
+    "greenhouseId": 123456789,
+    "tenantId": 987654321,
+    "sensorType": "TEMPERATURE",
+    "unit": "°C",
+    "avgValue": 21.5,
+    "minValue": 20.8,
+    "maxValue": 22.3,
+    "stddevValue": 0.45,
+    "countReadings": 60,
+    "nullCount": 0,
+    "firstReadingAt": "2025-03-03T13:00:15Z",
+    "lastReadingAt": "2025-03-03T13:59:45Z"
+  },
+  {
+    "bucket": "2025-03-03T14:00:00Z",
+    "greenhouseId": 123456789,
+    "tenantId": 987654321,
+    "sensorType": "TEMPERATURE",
+    "unit": "°C",
+    "avgValue": 22.1,
+    "minValue": 21.5,
+    "maxValue": 22.8,
+    "stddevValue": 0.38,
+    "countReadings": 60,
+    "nullCount": 0,
+    "firstReadingAt": "2025-03-03T14:00:10Z",
+    "lastReadingAt": "2025-03-03T14:59:50Z"
+  }
+]
+```
+
+---
+
+## Get Daily Statistics
+
+<api method="GET" url="/api/v1/statistics/daily" />
+
+Retrieve daily aggregated statistics for a sensor type.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="long" required>
+  ID of the greenhouse
+</ParamField>
+
+<ParamField query="sensorType" type="string" required>
+  Type of sensor
+</ParamField>
+
+<ParamField query="days" type="integer" default="7">
+  Number of days to retrieve
+</ParamField>
+
+### Response
+
+Returns an array of daily statistics with extended metrics:
+
+<ResponseField name="bucket" type="string">
+  Start of the 1-day bucket (ISO 8601)
+</ResponseField>
+
+<ResponseField name="greenhouseId" type="long">
+  ID of the greenhouse
+</ResponseField>
+
+<ResponseField name="tenantId" type="long">
+  ID of the tenant
+</ResponseField>
+
+<ResponseField name="sensorType" type="string">
+  Type of sensor
+</ResponseField>
+
+<ResponseField name="unit" type="string">
+  Unit of measurement
+</ResponseField>
+
+<ResponseField name="avgValue" type="number">
+  Average value for the day
+</ResponseField>
+
+<ResponseField name="minValue" type="number">
+  Minimum value in the day
+</ResponseField>
+
+<ResponseField name="maxValue" type="number">
+  Maximum value in the day
+</ResponseField>
+
+<ResponseField name="stddevValue" type="number">
+  Standard deviation
+</ResponseField>
+
+<ResponseField name="countReadings" type="long">
+  Total number of readings in the day
+</ResponseField>
+
+<ResponseField name="medianValue" type="number" optional>
+  Median value for the day
+</ResponseField>
+
+<ResponseField name="p95Value" type="number" optional>
+  95th percentile value
+</ResponseField>
+
+<ResponseField name="p5Value" type="number" optional>
+  5th percentile value
+</ResponseField>
+
+<ResponseField name="nullCount" type="long" optional>
+  Number of null readings
+</ResponseField>
+
+<ResponseField name="hoursWithData" type="integer" optional>
+  Number of hours (0-24) that had readings
+</ResponseField>
+
+<ResponseField name="firstReadingAt" type="string">
+  Timestamp of first reading in day
+</ResponseField>
+
+<ResponseField name="lastReadingAt" type="string">
+  Timestamp of last reading in day
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/statistics/daily?greenhouseId=123456789&sensorType=HUMIDITY&days=7" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  greenhouseId: '123456789',
+  sensorType: 'HUMIDITY',
+  days: '7'
+});
+
+const response = await fetch(
+  `https://api.example.com/api/v1/statistics/daily?${params}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const dailyStats = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.example.com/api/v1/statistics/daily',
+    params={
+        'greenhouseId': 123456789,
+        'sensorType': 'HUMIDITY',
+        'days': 7
+    },
+    headers={'Accept': 'application/json'}
+)
+
+daily_stats = response.json()
+```
+
+</CodeGroup>
+
+---
+
+## Get Statistics Summary
+
+<api method="GET" url="/api/v1/statistics/summary" />
+
+Retrieve a summary of statistics (min/max/avg) without chart data.
+
+### Query Parameters
+
+<ParamField query="greenhouseId" type="long" required>
+  ID of the greenhouse
+</ParamField>
+
+<ParamField query="sensorType" type="string" required>
+  Type of sensor
+</ParamField>
+
+<ParamField query="period" type="string" default="24h">
+  Time period. Options: `24h`, `7d`, `30d`
+</ParamField>
+
+### Response
+
+Returns a simple map of summary statistics:
+
+<ResponseField name="overall_avg" type="number">
+  Average value over the period
+</ResponseField>
+
+<ResponseField name="overall_min" type="number">
+  Minimum value
+</ResponseField>
+
+<ResponseField name="overall_max" type="number">
+  Maximum value
+</ResponseField>
+
+<ResponseField name="unit" type="string">
+  Unit of measurement
+</ResponseField>
+
+<ResponseField name="total_readings" type="long">
+  Total number of readings in period
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/statistics/summary?greenhouseId=123456789&sensorType=TEMPERATURE&period=7d" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const params = new URLSearchParams({
+  greenhouseId: '123456789',
+  sensorType: 'TEMPERATURE',
+  period: '7d'
+});
+
+const response = await fetch(
+  `https://api.example.com/api/v1/statistics/summary?${params}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const summary = await response.json();
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.example.com/api/v1/statistics/summary',
+    params={
+        'greenhouseId': 123456789,
+        'sensorType': 'TEMPERATURE',
+        'period': '7d'
+    },
+    headers={'Accept': 'application/json'}
+)
+
+summary = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "overall_avg": 21.8,
+  "overall_min": 19.5,
+  "overall_max": 24.1,
+  "unit": "°C",
+  "total_readings": 10080
+}
+```
+
+---
+
+## Get Sensor Trend
+
+<api method="GET" url="/api/v1/sensors/stats/{sensorId}/trend" />
+
+Calculate the trend (percentage change) for a sensor over a period.
+
+### Path Parameters
+
+<ParamField path="sensorId" type="string" required>
+  Unique identifier for the sensor
+</ParamField>
+
+### Query Parameters
+
+<ParamField query="tenantId" type="string" optional>
+  ID of the tenant (for multi-tenant filtering)
+</ParamField>
+
+<ParamField query="period" type="string" default="24h">
+  Time period. Examples: `24h`, `7d`, `30d`, `60m`
+</ParamField>
+
+### Response
+
+Returns trend analysis for the sensor:
+
+<ResponseField name="sensorId" type="string">
+  ID of the sensor
+</ResponseField>
+
+<ResponseField name="currentValue" type="number">
+  Most recent value
+</ResponseField>
+
+<ResponseField name="previousValue" type="number">
+  Value at the start of the period
+</ResponseField>
+
+<ResponseField name="percentChange" type="number">
+  Percentage change (positive or negative)
+</ResponseField>
+
+<ResponseField name="direction" type="string">
+  Trend direction: `INCREASING`, `DECREASING`, or `STABLE`
+</ResponseField>
+
+<ResponseField name="period" type="string">
+  Period used for calculation
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+
+```bash curl
+curl -X GET "https://api.example.com/api/v1/sensors/stats/TEMP_01/trend?period=24h" \
+  -H "Accept: application/json"
+```
+
+```javascript JavaScript
+const sensorId = 'TEMP_01';
+const period = '24h';
+
+const response = await fetch(
+  `https://api.example.com/api/v1/sensors/stats/${sensorId}/trend?period=${period}`,
+  {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json'
+    }
+  }
+);
+
+const trend = await response.json();
+```
+
+```python Python
+import requests
+
+sensor_id = 'TEMP_01'
+period = '24h'
+
+response = requests.get(
+    f'https://api.example.com/api/v1/sensors/stats/{sensor_id}/trend',
+    params={'period': period},
+    headers={'Accept': 'application/json'}
+)
+
+trend = response.json()
+```
+
+</CodeGroup>
+
+### Example Response
+
+```json
+{
+  "sensorId": "TEMP_01",
+  "currentValue": 22.5,
+  "previousValue": 21.8,
+  "percentChange": 3.2,
+  "direction": "INCREASING",
+  "period": "24h"
+}
+```
